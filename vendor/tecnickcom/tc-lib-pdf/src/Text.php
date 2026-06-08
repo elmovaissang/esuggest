@@ -1,0 +1,3172 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Text.php
+ *
+ * @since     2002-08-03
+ * @category  Library
+ * @package   Pdf
+ * @author    Nicola Asuni <info@tecnick.com>
+ * @copyright 2002-2026 Nicola Asuni - Tecnick.com LTD
+ * @license   https://www.gnu.org/copyleft/lesser.html GNU-LGPL v3 (see LICENSE.TXT)
+ * @link      https://github.com/tecnickcom/tc-lib-pdf
+ *
+ * This file is part of tc-lib-pdf software library.
+ */
+
+namespace Com\Tecnick\Pdf;
+
+use Com\Tecnick\Pdf\Exception as PdfException;
+use Com\Tecnick\Unicode\Bidi;
+use Com\Tecnick\Unicode\Data\Constant as UnicodeConstant;
+use Com\Tecnick\Unicode\Data\Type as UnicodeType;
+use Com\Tecnick\Unicode\Substitution;
+
+/**
+ * Com\Tecnick\Pdf\Text
+ *
+ * Text PDF data
+ *
+ * @since     2002-08-03
+ * @category  Library
+ * @package   Pdf
+ * @author    Nicola Asuni <info@tecnick.com>
+ * @copyright 2002-2026 Nicola Asuni - Tecnick.com LTD
+ * @license   https://www.gnu.org/copyleft/lesser.html GNU-LGPL v3 (see LICENSE.TXT)
+ * @link      https://github.com/tecnickcom/tc-lib-pdf
+ *
+ * @phpstan-import-type TTextDims from \Com\Tecnick\Pdf\Font\Stack
+ * @phpstan-import-type TTextSplit from \Com\Tecnick\Pdf\Font\Stack
+ * @phpstan-import-type StyleDataOpt from \Com\Tecnick\Pdf\Cell
+ * @phpstan-import-type TCellDef from \Com\Tecnick\Pdf\Cell
+ * @phpstan-import-type PageInputData from \Com\Tecnick\Pdf\Page\Box
+ * @phpstan-import-type PageData from \Com\Tecnick\Pdf\Page\Box
+ * @phpstan-import-type TFontMetric from \Com\Tecnick\Pdf\Font\Stack
+ * @phpstan-import-type TBBox from \Com\Tecnick\Pdf\Base
+ * @phpstan-import-type TStackUnitBBox from \Com\Tecnick\Pdf\Base
+ * @phpstan-import-type TPdfUaStructElem from \Com\Tecnick\Pdf\Base
+ * @phpstan-import-type TPdfUaStructKid from \Com\Tecnick\Pdf\Base
+ *
+ * @phpstan-type TextCellStyles array{
+ *          all?: StyleDataOpt, // One style applied to all four borders.
+ *          L?: StyleDataOpt, // Left border style.
+ *          T?: StyleDataOpt, // Top border style.
+ *          R?: StyleDataOpt, // Right border style.
+ *          B?: StyleDataOpt, // Bottom border style.
+ *      }
+ * @phpstan-type TextCellStylesLegacy array{
+ *          all?: StyleDataOpt, // One style applied to all four borders.
+ *          0?: StyleDataOpt, // Top border style (legacy numeric side index).
+ *          1?: StyleDataOpt, // Right border style (legacy numeric side index).
+ *          2?: StyleDataOpt, // Bottom border style (legacy numeric side index).
+ *          3?: StyleDataOpt, // Left border style (legacy numeric side index).
+ *      }
+ * @phpstan-type TextCellStylesInput TextCellStyles|TextCellStylesLegacy
+ *
+ * @phpstan-type TextShadow array{
+ *          'xoffset': float,
+ *          'yoffset': float,
+ *          'opacity': float,
+ *          'mode': string,
+ *          'color': string,
+ *      }
+ *
+ * @phpstan-type TextLinePos array{
+ *          'pos': int,
+ *          'chars': int,
+ *          'spaces': int,
+ *          'septype': string,
+ *          'totwidth': float,
+ *          'totspacewidth': float,
+ *          'words': int,
+ *      }
+ *
+ * @SuppressWarnings("PHPMD.DepthOfInheritance")
+ */
+abstract class Text extends \Com\Tecnick\Pdf\Cell
+{
+    /**
+     * Tiny tolerance in internal points for line-fit comparisons.
+     * Prevents floating-point boundary artifacts from forcing spurious wraps.
+     */
+    protected const LINE_FIT_EPSILON = 1.0E-7;
+
+    /**
+     * Lower bound for text-cell horizontal compression (percentage).
+     */
+    protected const TEXTCELL_MIN_STRETCH = 50.0;
+
+    /**
+     * Readable lower bound for text-cell auto-fit font size in points.
+     */
+    protected const TEXTCELL_MIN_FONTSIZE = 4.0;
+
+    /**
+     * Unicode ligature codepoints that require /ActualText in PDF/UA mode,
+     * mapped to their decomposed UTF-8 text equivalents.
+     *
+     * @var array<int, string>
+     */
+    protected const LIGATURE_MAP = [
+        0xFB00 => 'ff',
+        0xFB01 => 'fi',
+        0xFB02 => 'fl',
+        0xFB03 => 'ffi',
+        0xFB04 => 'ffl',
+        0xFB05 => 'st',
+        0xFB06 => 'st',
+        0x0132 => 'IJ',
+        0x0133 => 'ij',
+    ];
+
+    /**
+     * The array of hyphenation patterns used for text processing.
+     *
+     * @var array<string, string> Array of hyphenation patterns.
+     */
+    protected array $hyphen_patterns = [];
+
+    /**
+     * Dafault value for $dim array.
+     *
+     * @var TTextDims
+     */
+    protected const DIM_DEFAULT = [
+        'chars' => 0,
+        'spaces' => 0,
+        'words' => 0,
+        'totwidth' => 0.0,
+        'totspacewidth' => 0.0,
+        'split' => [],
+    ];
+
+    /**
+     * Default empty bounding box value.
+     *
+     * @var TBBox
+     */
+    protected const BBOX_DEFAULT = [
+        'x' => 0.0,
+        'y' => 0.0,
+        'w' => 0.0,
+        'h' => 0.0,
+    ];
+
+    /**
+     * If true, ZERO-WIDTH-SPACE characters are automatically added
+     * to the text to allow line breaking after some non-letter characters.
+     *
+     * @var bool
+     */
+    protected bool $autozerowidthbreaks = false;
+
+    /**
+     * Returns the PDF code to render a text block inside a rectangular cell.
+     *
+     * @param string      $txt         Text string to be processed.
+     * @param float       $posx        Abscissa of upper-left corner.
+     * @param float       $posy        Ordinate of upper-left corner.
+     * @param float       $width       Width.
+     * @param float       $height      Height.
+     * @param float       $offset      Horizontal offset to apply to the line start.
+     * @param float       $linespace   Additional space to add between lines.
+     * @param string      $valign      Text vertical alignment inside the cell: T=top; C=center; B=bottom.
+     * @param string      $halign      Text horizontal alignment inside the cell: L=left; C=center; R=right; J=justify.
+     * @param ?TCellDef   $cell        Optional to overwrite cell parameters for padding, margin etc.
+     * @param TextCellStylesInput $styles Cell border styles (see: getCurrentStyleArray).
+     * @param float       $strokewidth Stroke width.
+     * @param float       $wordspacing Word spacing (use it only when justify == false).
+     * @param float       $leading     Leading.
+     * @param float       $rise        Text rise.
+     * @param bool        $jlast       If true does not justify the last line when $halign == J.
+     * @param bool        $fill        If true fills the text.
+     * @param bool        $stroke      If true stroke the text.
+     * @param bool        $underline   If true underline the text.
+     * @param bool        $linethrough If true line through the text.
+     * @param bool        $overline    If true overline the text.
+     * @param bool        $clip        If true activate clipping mode.
+     * @param bool        $drawcell    If true draw the cell border.
+     * @param string      $forcedir    If 'R' forces RTL, if 'L' forces LTR.
+     * @param ?TextShadow $shadow      Text shadow parameters.
+     * @param string      $fit         Option to fit the overflowing text in the given cell dimensions.
+     *                                 Supported values:
+     *                                 - '': disabled (default)
+     *                                 - 'T': truncate text to fit width and height
+     *                                 - 'S': compress horizontally to best fit width
+     *                                 - 'F': decrease font size only when text is too large
+     *
+     * @return string
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     * @throws \Com\Tecnick\Unicode\Exception
+     * @throws \Com\Tecnick\Pdf\Page\Exception
+     */
+    public function getTextCell(
+        string $txt,
+        float $posx = 0,
+        float $posy = 0,
+        float $width = 0,
+        float $height = 0,
+        float $offset = 0,
+        float $linespace = 0,
+        string $valign = 'C',
+        string $halign = 'C',
+        ?array $cell = null,
+        array $styles = [],
+        float $strokewidth = 0,
+        float $wordspacing = 0,
+        float $leading = 0,
+        float $rise = 0,
+        bool $jlast = true,
+        bool $fill = true,
+        bool $stroke = false,
+        bool $underline = false,
+        bool $linethrough = false,
+        bool $overline = false,
+        bool $clip = false,
+        bool $drawcell = true,
+        string $forcedir = '',
+        ?array $shadow = null,
+        string $fit = '',
+    ): string {
+        if ($txt === '') {
+            return '';
+        }
+
+        $ordarr = [];
+        $dim = self::DIM_DEFAULT;
+        $this->prepareText($txt, $ordarr, $dim, $forcedir);
+        $txt_pwidth = $dim['totwidth'];
+
+        $cell = $this->adjustMinCellPadding($styles, $cell);
+
+        $pntx = $this->toPoints($posx);
+
+        $cell_pwidth = $this->toPoints($width);
+        if ($width <= 0) {
+            $cell_pwidth = \min($this->cellMaxWidth($pntx, $cell), $this->cellMinWidth($txt_pwidth, $halign, $cell));
+        }
+
+        $txt_pwidth = $this->textMaxWidth($cell_pwidth, $cell);
+
+        $cell_pheight = $this->toPoints($height);
+        $offset_points = $this->toPoints($offset);
+        $linespace_points = $this->toPoints($linespace);
+
+        $fit_state = $this->resolveTextCellFitState(
+            $fit,
+            $ordarr,
+            $dim,
+            $txt_pwidth,
+            $cell_pheight - $cell['padding']['T'] - $cell['padding']['B'],
+            $offset_points,
+            $linespace_points,
+        );
+        $ordarr = $fit_state['ordarr'];
+        $dim = $fit_state['dim'];
+        $lines = $fit_state['lines'];
+        $txt_pheight = $fit_state['txtheight'];
+        $line_width_points = $fit_state['line_width_points'];
+        $fontout_prefix = $fit_state['fontout_prefix'];
+        $restore_font = $fit_state['restore_font'];
+        $restore_font_output = $fit_state['restore_font_output'];
+        $fontout_restore = $fit_state['fontout_restore'];
+        if ($height <= 0 || $width <= 0) {
+            $cell_pheight = $this->cellMinHeight($txt_pheight, $valign, $cell);
+        }
+
+        $curfont = $this->font->getCurrentFont();
+        $fontAscentVal = $curfont['ascent'];
+        $fontascent = $this->toUnit($fontAscentVal);
+        $line_width = $this->toUnit($line_width_points);
+
+        $pnty = $this->toYPoints($posy);
+        $cell_pnty = $pnty - $cell['margin']['T'];
+
+        $txt_pnty = $this->textVPosFromCell($cell_pnty, $cell_pheight, $txt_pheight, $valign, $cell);
+
+        $cell_pntx = $this->cellHPos($pntx, $cell_pwidth, 'L', $cell);
+        $txt_pntx = $this->textHPosFromCell($cell_pntx, $cell_pwidth, $line_width_points, $halign, $cell);
+
+        $txt_out = '';
+        $result = '';
+        $fontout_suffix = '';
+
+        try {
+            $txt_out = $this->outTextLines(
+                $ordarr,
+                $lines,
+                $this->toUnit($txt_pntx),
+                $this->toYUnit($txt_pnty),
+                $line_width,
+                $offset,
+                $fontascent,
+                $linespace,
+                $strokewidth,
+                $wordspacing,
+                $leading,
+                $rise,
+                $halign,
+                $jlast,
+                $fill,
+                $stroke,
+                $underline,
+                $linethrough,
+                $overline,
+                $clip,
+                $shadow,
+            );
+
+            if ($fontout_prefix !== '') {
+                $txt_out = $fontout_prefix . $txt_out;
+            }
+
+            $this->cellbbox[] = [
+                'x' => $this->toUnit($cell_pntx),
+                'y' => $this->toYUnit($cell_pnty),
+                'w' => $this->toUnit($cell_pwidth),
+                'h' => $this->toUnit($cell_pheight),
+            ];
+
+            if (!$drawcell) {
+                $result = $txt_out;
+            } else {
+                $cell_out = $this->drawCell($cell_pntx, $cell_pnty, $cell_pwidth, $cell_pheight, $styles, $cell);
+                $result = $cell_out . $txt_out;
+            }
+        } finally {
+            if ($restore_font) {
+                $this->font->popLastFont();
+                if ($restore_font_output) {
+                    $fontout_suffix = $fontout_restore;
+                    if ($fontout_suffix === '') {
+                        $fontout_suffix = $this->font->getOutCurrentFont();
+                    }
+                }
+            }
+        }
+
+        if ($fontout_suffix !== '') {
+            return $result . $fontout_suffix;
+        }
+
+        return $result;
+    }
+
+    /**
+     * Adds a text block inside a rectangular cell using absolute page coordinates.
+     * Accounts for automatic line, page and region breaks.
+     *
+     * @param string      $txt         Text string to be processed.
+     * @param int         $pid         Page index. Omit or set it to -1 for the current page ID.
+     * @param float       $posx        Abscissa of upper-left corner.
+     * @param float       $posy        Ordinate of upper-left corner.
+     * @param float       $width       Width.
+     * @param float       $height      Height.
+     * @param float       $offset      Horizontal offset to apply to the line start.
+     * @param float       $linespace   Additional space to add between lines.
+     * @param string      $valign      Text vertical alignment inside the cell: T=top; C=center; B=bottom.
+     * @param string      $halign      Text horizontal alignment inside the cell: L=left; C=center; R=right; J=justify.
+     * @param ?TCellDef   $cell        Optional to overwrite cell parameters for padding, margin etc.
+     * @param TextCellStylesInput $styles Cell border styles (see: getCurrentStyleArray).
+     * @param float       $strokewidth Stroke width.
+     * @param float       $wordspacing Word spacing (use it only when justify == false).
+     * @param float       $leading     Leading.
+     * @param float       $rise        Text rise.
+     * @param bool        $jlast       If true does not justify the last line when $halign == J.
+     * @param bool        $fill        If true fills the text.
+     * @param bool        $stroke      If true stroke the text.
+     * @param bool        $underline   If true underline the text.
+     * @param bool        $linethrough If true line through the text.
+     * @param bool        $overline    If true overline the text.
+     * @param bool        $clip        If true activate clipping mode.
+     * @param bool        $drawcell    If true draw the cell border.
+     * @param string      $forcedir    If 'R' forces RTL, if 'L' forces LTR.
+     * @param ?TextShadow $shadow      Text shadow parameters.
+     * @param string      $fit         Option to fit the overflowing text in the given cell dimensions.
+     *                                 Supported values:
+     *                                 - '': disabled (default)
+     *                                 - 'T': truncate text to fit width and height
+     *                                 - 'S': compress horizontally to best fit width
+     *                                 - 'F': decrease font size only when text is too large
+     *
+     * @return void
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     * @throws \Com\Tecnick\Unicode\Exception
+     * @throws \Com\Tecnick\Pdf\Page\Exception
+     */
+    public function addTextCellXY(
+        string $txt,
+        int $pid = -1,
+        float $posx = 0,
+        float $posy = 0,
+        float $width = 0,
+        float $height = 0,
+        float $offset = 0,
+        float $linespace = 0,
+        string $valign = 'T',
+        string $halign = '',
+        ?array $cell = null,
+        array $styles = [],
+        float $strokewidth = 0,
+        float $wordspacing = 0,
+        float $leading = 0,
+        float $rise = 0,
+        bool $jlast = true,
+        bool $fill = true,
+        bool $stroke = false,
+        bool $underline = false,
+        bool $linethrough = false,
+        bool $overline = false,
+        bool $clip = false,
+        bool $drawcell = true,
+        string $forcedir = '',
+        ?array $shadow = null,
+        string $fit = '',
+    ): void {
+        $region = $this->page->getRegion($pid);
+        $rposx = $posx - $region['RX'];
+        $rposy = $posy - $region['RY'];
+        $this->addTextCell(
+            $txt,
+            $pid,
+            $rposx,
+            $rposy,
+            $width,
+            $height,
+            $offset,
+            $linespace,
+            $valign,
+            $halign,
+            $cell,
+            $styles,
+            $strokewidth,
+            $wordspacing,
+            $leading,
+            $rise,
+            $jlast,
+            $fill,
+            $stroke,
+            $underline,
+            $linethrough,
+            $overline,
+            $clip,
+            $drawcell,
+            $forcedir,
+            $shadow,
+            $fit,
+        );
+    }
+
+    /**
+     * Adds a text block inside a rectangular cell using relative coordinates.
+     * Accounts for automatic line, page and region breaks.
+     *
+     * @param string      $txt         Text string to be processed.
+     * @param int         $pid         Page index. Omit or set it to -1 for the current page ID.
+     * @param float       $posx        Abscissa of upper-left corner relative to the region origin X coordinate.
+     * @param float       $posy        Ordinate of upper-left corner relative to the region origin Y coordinate.
+     * @param float       $width       Width.
+     * @param float       $height      Height.
+     * @param float       $offset      Horizontal offset to apply to the line start.
+     * @param float       $linespace   Additional space to add between lines.
+     * @param string      $valign      Text vertical alignment inside the cell: T=top; C=center; B=bottom.
+     * @param string      $halign      Text horizontal alignment inside the cell: L=left; C=center; R=right; J=justify.
+     * @param ?TCellDef   $cell        Optional to overwrite cell parameters for padding, margin etc.
+     * @param TextCellStylesInput $styles Cell border styles (see: getCurrentStyleArray).
+     * @param float       $strokewidth Stroke width.
+     * @param float       $wordspacing Word spacing (use it only when justify == false).
+     * @param float       $leading     Leading.
+     * @param float       $rise        Text rise.
+     * @param bool        $jlast       If true does not justify the last line when $halign == J.
+     * @param bool        $fill        If true fills the text.
+     * @param bool        $stroke      If true stroke the text.
+     * @param bool        $underline   If true underline the text.
+     * @param bool        $linethrough If true line through the text.
+     * @param bool        $overline    If true overline the text.
+     * @param bool        $clip        If true activate clipping mode.
+     * @param bool        $drawcell    If true draw the cell border.
+     * @param string      $forcedir    If 'R' forces RTL, if 'L' forces LTR.
+     * @param ?TextShadow $shadow      Text shadow parameters.
+     * @param string      $fit         Option to fit the overflowing text in the given cell dimensions.
+     *                                 Supported values:
+     *                                 - '': disabled (default)
+     *                                 - 'T': truncate text to fit width and height
+     *                                 - 'S': compress horizontally to best fit width
+     *                                 - 'F': decrease font size only when text is too large
+     *
+     * @return void
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     * @throws \Com\Tecnick\Unicode\Exception
+     * @throws \Com\Tecnick\Pdf\Page\Exception
+     */
+    public function addTextCell(
+        string $txt,
+        int $pid = -1,
+        float $posx = 0,
+        float $posy = 0,
+        float $width = 0,
+        float $height = 0,
+        float $offset = 0,
+        float $linespace = 0,
+        string $valign = 'T',
+        string $halign = '',
+        ?array $cell = null,
+        array $styles = [],
+        float $strokewidth = 0,
+        float $wordspacing = 0,
+        float $leading = 0,
+        float $rise = 0,
+        bool $jlast = true,
+        bool $fill = true,
+        bool $stroke = false,
+        bool $underline = false,
+        bool $linethrough = false,
+        bool $overline = false,
+        bool $clip = false,
+        bool $drawcell = true,
+        string $forcedir = '',
+        ?array $shadow = null,
+        string $fit = '',
+    ): void {
+        if ($txt === '') {
+            return;
+        }
+
+        if ($pid < 0) {
+            $pid = (int) $this->page->getPageId();
+        }
+
+        if ($halign === '') {
+            $halign = $this->rtl ? 'R' : 'L';
+        }
+
+        $cstyles = $styles;
+        if ($cstyles === []) {
+            $cstyles = ['all' => $this->graph->getCurrentStyleArray()];
+        }
+        if ($drawcell && \count($cstyles) === 1 && isset($cstyles['all']) && $cstyles['all'] !== []) {
+            $cstyles[0] = $cstyles['all'];
+            $cstyles[1] = $cstyles['all'];
+            $cstyles[2] = $cstyles['all'];
+            $cstyles[3] = $cstyles['all'];
+        }
+
+        $ordarr = [];
+        $dim = self::DIM_DEFAULT;
+        $this->prepareText($txt, $ordarr, $dim, $forcedir);
+        $txt_pwidth = $dim['totwidth'];
+        $actualText = $this->pdfuaMode !== '' ? $this->getActualTextForOrdarr($ordarr) : '';
+
+        $ocell = $this->adjustMinCellPadding($cstyles, $cell);
+        $cell = $ocell;
+
+        $cell_pntw = $this->toPoints($width);
+        $cell_pnth = $this->toPoints($height);
+        $fit_txt_pwidth = $this->textMaxWidth($cell_pntw, $cell);
+
+        $fit_state = $this->resolveTextCellFitState(
+            $fit,
+            $ordarr,
+            $dim,
+            $fit_txt_pwidth,
+            $cell_pnth - $cell['padding']['T'] - $cell['padding']['B'],
+            $this->toPoints($offset),
+            $this->toPoints($linespace),
+        );
+        $ordarr = $fit_state['ordarr'];
+        $dim = $fit_state['dim'];
+        $txt_pwidth = $dim['totwidth'];
+        $fontout_prefix = $fit_state['fontout_prefix'];
+        $restore_font = $fit_state['restore_font'];
+        $restore_font_output = $fit_state['restore_font_output'];
+        $fontout_restore = $fit_state['fontout_restore'];
+        $line_width_points = $fit_state['line_width_points'];
+        $fit_lines = $fit_state['lines'];
+        $use_prefit_layout = $width > 0 && $height > 0;
+
+        $curfont = $this->font->getCurrentFont();
+        $fontAscentVal = $curfont['ascent'];
+        $fontHeightVal = $curfont['height'];
+        $fontascent = $this->toUnit($fontAscentVal);
+        $fontheight = $this->toUnit($fontHeightVal);
+
+        $region_max_lines = 1;
+        $num_blocks = 0;
+        $fontout_suffix = '';
+
+        // loop through the regions to fit all available text
+        try {
+            while ($region_max_lines > 0) {
+                $region = $this->page->getRegion($pid);
+                $regionRy = $region['RY'];
+                $regionRx = $region['RX'];
+                $regionRh = $region['RH'];
+                $rposy = $posy + $regionRy;
+                $cell_pnty = $this->toYPoints($rposy) - $cell['margin']['T'];
+                $cell_posy = $this->toYUnit($cell_pnty);
+
+                $rposx = $posx + $regionRx;
+                $rpntx = $this->toPoints($rposx);
+
+                $cell_pwidth = $cell_pntw;
+                if ($width <= 0) {
+                    $cell_pwidth = \min(
+                        $this->cellMaxWidth($rpntx, $cell),
+                        $this->cellMinWidth($txt_pwidth, $halign, $cell),
+                    );
+                }
+
+                $txt_pwidth = $this->textMaxWidth($cell_pwidth, $cell);
+                $display_pwidth = $txt_pwidth;
+                if ($use_prefit_layout && $num_blocks === 0) {
+                    $display_pwidth = $line_width_points;
+                }
+                $line_width = $this->toUnit($display_pwidth);
+
+                $cell_pntx = $rpntx + $cell['margin']['L'];
+                $txt_pntx = $this->textHPosFromCell($cell_pntx, $cell_pwidth, $display_pwidth, $halign, $cell);
+                $line_posx = $this->toUnit($txt_pntx);
+
+                if ($use_prefit_layout && $num_blocks === 0) {
+                    $lines = $fit_lines;
+                } else {
+                    $lines = $this->splitLines($ordarr, $dim, $txt_pwidth, $this->toPoints($offset));
+                }
+                $numlines = \count($lines);
+
+                $vspace = $this->textMaxHeight($regionRh + $cell['margin']['B'] + $cell['padding']['B'] - $cell_posy);
+                $region_max_lines = (int) (($vspace + $linespace) / ($fontheight + $linespace));
+                $lastblock = $numlines <= $region_max_lines;
+
+                $rlines = $lines;
+                if ($numlines > $region_max_lines) {
+                    $rlines = \array_slice($lines, 0, $region_max_lines);
+                }
+
+                $txt_pheight = ($numlines * $fontHeightVal) + (($numlines - 1) * $this->toPoints($linespace));
+
+                $cell_pheight = $cell_pnth;
+                if ($height <= 0) {
+                    $cell_pheight = $this->cellMinHeight($txt_pheight, $valign, $cell);
+                }
+
+                $txt_pnty = $this->textVPosFromCell($cell_pnty, $cell_pheight, $txt_pheight, $valign, $cell);
+                $line_posy = $this->toYUnit($txt_pnty);
+
+                $this->cellbbox[] = [
+                    'x' => $this->toUnit($cell_pntx),
+                    'y' => $this->toYUnit($cell_pnty),
+                    'w' => $this->toUnit($cell_pwidth),
+                    'h' => $this->toUnit($cell_pheight),
+                ];
+
+                $out = $this->outTextLines(
+                    $ordarr,
+                    $rlines,
+                    $line_posx,
+                    $line_posy,
+                    $line_width,
+                    $offset,
+                    $fontascent,
+                    $linespace,
+                    $strokewidth,
+                    $wordspacing,
+                    $leading,
+                    $rise,
+                    $halign,
+                    $lastblock and $jlast,
+                    $fill,
+                    $stroke,
+                    $underline,
+                    $linethrough,
+                    $overline,
+                    $clip,
+                    $shadow,
+                );
+
+                if ($drawcell) {
+                    $styles = $cstyles;
+                    if ($num_blocks > 0) {
+                        $styles[0]['lineWidth'] = 0;
+                        !isset($styles[0]['fillColor']) || $styles[0]['fillColor'] === ''
+                            ? null
+                            : ($styles[0]['lineColor'] = $styles[0]['fillColor']);
+                        if (!$lastblock) {
+                            $styles[2]['lineWidth'] = 0;
+                            !isset($styles[2]['fillColor']) || $styles[2]['fillColor'] === ''
+                                ? null
+                                : ($styles[2]['lineColor'] = $styles[2]['fillColor']);
+                        }
+                    }
+
+                    $out = $this->drawCell($cell_pntx, $cell_pnty, $cell_pwidth, $cell_pheight, $styles, $cell) . $out;
+                }
+
+                if ($fontout_prefix !== '' && $num_blocks === 0) {
+                    $out = $fontout_prefix . $out;
+                }
+
+                $this->page->addContent($this->tagPdfUaTextContent($out, $pid, $actualText), $pid);
+
+                if ($lastblock) {
+                    break;
+                }
+
+                if (!isset($lines[$region_max_lines]['pos'])) {
+                    break;
+                }
+
+                $ordarr = \array_slice($ordarr, $lines[$region_max_lines]['pos']);
+                $dim = $this->font->getOrdArrDims($ordarr);
+                $posy = 0;
+                $offset = 0;
+                $num_blocks++;
+
+                $cell = $ocell;
+                $cell['margin']['T'] = 0;
+                $cell['margin']['B'] = 0;
+
+                $this->page->getNextRegion($pid);
+                $curpid = (int) $this->page->getPageId();
+                if ($curpid > $pid) {
+                    $pid = $curpid;
+                    $this->setPageContext($pid);
+                }
+            }
+        } finally {
+            if ($restore_font) {
+                $this->font->popLastFont();
+                if ($restore_font_output) {
+                    $fontout_suffix = $fontout_restore;
+                    if ($fontout_suffix === '') {
+                        $fontout_suffix = $this->font->getOutCurrentFont();
+                    }
+                }
+            }
+        }
+
+        if ($fontout_suffix !== '') {
+            $this->page->addContent($fontout_suffix, $pid);
+        }
+    }
+
+    /**
+     * Open a PDF/UA structure element bracket.
+     * Call this before rendering the content of a logical block (e.g. <p>, <h1>).
+     * All addTextCell calls until endStructElem() share the same structure element.
+     *
+     * @param string      $role PDF structure role, e.g. 'P', 'H1', 'H2', 'L', 'LI', 'Figure'.
+     * @param int         $pid  Page index (from addPage / getPageId).
+     * @param string|null $alt  Optional alternate description written as /Alt in the structure element
+     *                          dictionary — primarily used for Figure elements to carry accessible alt-text.
+     * @param array<string, string> $attr Optional structure element attributes, serialized as
+     *                                    a PDF dictionary in the /A entry.
+     */
+    public function beginStructElem(string $role, int $pid, ?string $alt = null, array $attr = []): void
+    {
+        if ($this->pdfuaMode === '') {
+            return;
+        }
+
+        /** @var TPdfUaStructElem $entry */
+        $entry = [
+            'role' => $role,
+            'pid' => $pid,
+            'mcids' => [],
+            'kids' => [],
+        ];
+        if ($alt !== null && $alt !== '') {
+            $entry['alt'] = $alt;
+        }
+
+        if ($attr !== []) {
+            $entry['attr'] = $attr;
+        }
+
+        $this->pdfuaStructStack[] = $entry;
+    }
+
+    /**
+     * Close the current PDF/UA structure element bracket.
+     * The completed element (with all its MCIDs) is appended to the struct log.
+     */
+    public function endStructElem(): void
+    {
+        if ($this->pdfuaMode === '' || $this->pdfuaStructStack === []) {
+            return;
+        }
+
+        $topIndex = \array_key_last($this->pdfuaStructStack);
+        if (!isset($this->pdfuaStructStack[$topIndex])) {
+            return;
+        }
+
+        $top = $this->pdfuaStructStack[$topIndex];
+        unset($this->pdfuaStructStack[$topIndex]);
+
+        // Only log elements that received marked-content or nested structure children.
+        if ($top['kids'] !== [] || isset($top['annots']) && $top['annots'] !== []) {
+            $entryIndex = \count($this->pdfuaStructLog);
+            $this->pdfuaStructLog[] = $top;
+
+            $parentTop = \array_key_last($this->pdfuaStructStack);
+            if ($parentTop !== null && isset($this->pdfuaStructStack[$parentTop])) {
+                $parentEntry = $this->pdfuaStructStack[$parentTop];
+                /** @var TPdfUaStructKid $kid */
+                $kid = [
+                    'type' => 'elem',
+                    'id' => $entryIndex,
+                ];
+                $parentEntry['kids'][] = $kid;
+                $this->pdfuaStructStack[$parentTop] = $parentEntry;
+            }
+        }
+    }
+
+    /**
+     * Add non-text graphical content as a tagged Figure block in PDF/UA mode.
+     *
+     * Pass raw drawing/image operators (for example from graph or image helpers)
+     * to associate them with a Figure structure element and optional /Alt text.
+     *
+     * @throws \Com\Tecnick\Pdf\Page\Exception
+     */
+    public function addTaggedFigureContent(string $content, int $pid, string $alt = ''): void
+    {
+        if ($content === '') {
+            return;
+        }
+
+        $this->page->addContent($this->tagPdfUaFigureContent($content, $pid, $alt), $pid);
+    }
+
+    /**
+     * Open an Artifact marked-content block for non-semantic page content.
+     *
+     * Typical usage is for repeated page furniture (header/footer/page numbers),
+     * decorative graphics, separators, and similar visual-only content.
+     * This method returns the opening PDF operators and does not write them to
+     * the current page automatically. To persist the artifact block, append the
+     * returned string with page->addContent(...) or use addArtifactContent().
+     *
+     * @param string $type    Optional Artifact /Type name (for example 'Pagination').
+     * @param string $subtype Optional Artifact /Subtype name (for example 'Header' or 'Footer').
+     */
+    public function beginArtifact(string $type = '', string $subtype = ''): string
+    {
+        if ($this->pdfuaMode === '') {
+            return '';
+        }
+
+        $type = $this->normalizePdfName($type);
+        $subtype = $this->normalizePdfName($subtype);
+
+        if ($type === '' && $subtype === '') {
+            return '/Artifact BMC' . "\n";
+        }
+
+        $props = [];
+        if ($type !== '') {
+            $props[] = '/Type /' . $type;
+        }
+        if ($subtype !== '') {
+            $props[] = '/Subtype /' . $subtype;
+        }
+
+        return '/Artifact << ' . \implode(' ', $props) . ' >> BDC' . "\n";
+    }
+
+    /**
+     * Close an Artifact marked-content block opened by beginArtifact().
+     *
+     * Like beginArtifact(), this returns raw PDF operators and must be appended
+     * to the page content explicitly when using the low-level API.
+     */
+    public function endArtifact(): string
+    {
+        if ($this->pdfuaMode === '') {
+            return '';
+        }
+
+        return 'EMC' . "\n";
+    }
+
+    /**
+     * Add non-semantic content wrapped as Artifact marked-content.
+     *
+     * This is the preferred API for decorative graphics and page furniture
+     * because it writes the wrapped content directly to the selected page.
+     *
+     * @param string $content Raw PDF operators to wrap.
+     * @param int    $pid     Page index.
+     * @param string $type    Optional Artifact /Type (for example 'Pagination').
+     * @param string $subtype Optional Artifact /Subtype (for example 'Header' or 'Footer').
+     *
+     * @throws \Com\Tecnick\Pdf\Page\Exception
+     */
+    public function addArtifactContent(string $content, int $pid, string $type = '', string $subtype = ''): void
+    {
+        if ($content === '') {
+            return;
+        }
+
+        $this->page->addContent($this->tagPdfUaArtifactContent($content, $type, $subtype), $pid);
+    }
+
+    /**
+     * Normalize text-cell fit mode. Unknown values disable auto-fit.
+     */
+    protected function normalizeTextCellFitMode(string $fit): string
+    {
+        $fit = \strtoupper(\trim($fit));
+        return match ($fit) {
+            'T', 'S', 'F' => $fit,
+            default => '',
+        };
+    }
+
+    /**
+     * Returns true when auto-fit can be applied safely.
+     */
+    protected function canApplyTextCellFit(
+        string $fit,
+        float $cellWidth,
+        float $cellHeight,
+        float $textWidth,
+        float $textHeight,
+    ): bool {
+        return $fit !== '' && $cellWidth > 0 && $cellHeight > 0 && $textWidth > 0 && $textHeight > 0;
+    }
+
+    /**
+     * Resolve the fitted text-cell geometry and any temporary font state changes.
+     *
+     * @param array<int, int> $ordarr
+     * @param TTextDims $dim
+     *
+     * @return array{
+     *     ordarr: array<int, int>,
+     *     dim: TTextDims,
+     *     lines: array<int, TextLinePos>,
+     *     txtheight: float,
+     *     line_width_points: float,
+     *     fontout_prefix: string,
+     *     restore_font: bool,
+     *     restore_font_output: bool,
+     *     fontout_restore: string
+     * }
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     */
+    protected function resolveTextCellFitState(
+        string $fit,
+        array $ordarr,
+        array $dim,
+        float $txt_pwidth,
+        float $inner_pheight,
+        float $offset_points,
+        float $linespace_points,
+    ): array {
+        $fit = $this->normalizeTextCellFitMode($fit);
+
+        $base_layout = $this->getTextCellLayout(
+            $ordarr,
+            $dim,
+            $txt_pwidth,
+            $txt_pwidth,
+            1.0,
+            $offset_points,
+            $linespace_points,
+        );
+
+        $lines = $base_layout['lines'];
+        $txt_pheight = $base_layout['txtheight'];
+        $line_width_points = $txt_pwidth;
+        $fontout_prefix = '';
+        $restore_font = false;
+        $restore_font_output = false;
+        $fontout_restore = '';
+
+        if (
+            $this->canApplyTextCellFit($fit, $txt_pwidth, $inner_pheight, $txt_pwidth, $txt_pheight)
+            && $this->textCellLayoutOverflows($base_layout, $txt_pwidth, $inner_pheight)
+        ) {
+            switch ($fit) {
+                case 'T':
+                    $ordarr = $this->fitTextCellByTruncation(
+                        $ordarr,
+                        $txt_pwidth,
+                        $inner_pheight,
+                        $offset_points,
+                        $linespace_points,
+                    );
+                    $dim = $this->font->getOrdArrDims($ordarr);
+                    $base_layout = $this->getTextCellLayout(
+                        $ordarr,
+                        $dim,
+                        $txt_pwidth,
+                        $txt_pwidth,
+                        1.0,
+                        $offset_points,
+                        $linespace_points,
+                    );
+                    break;
+                case 'S':
+                    $stretch_fit = $this->fitTextCellByStretch(
+                        $ordarr,
+                        $dim,
+                        $txt_pwidth,
+                        $inner_pheight,
+                        $offset_points,
+                        $linespace_points,
+                    );
+                    $restore_font = $stretch_fit['fontchanged'];
+                    $line_width_points = $stretch_fit['linewidth'];
+                    $base_layout = $stretch_fit['layout'];
+                    break;
+                case 'F':
+                    $font_before_fit = $this->font->getCurrentFont();
+                    $fontout_restore = $font_before_fit['out'];
+                    $font_fit = $this->fitTextCellByFontSize(
+                        $ordarr,
+                        $txt_pwidth,
+                        $inner_pheight,
+                        $offset_points,
+                        $linespace_points,
+                    );
+                    $restore_font = $font_fit['fontchanged'];
+                    $restore_font_output = $font_fit['fontchanged'];
+                    $fontout_prefix = $font_fit['fontout'];
+                    $dim = $font_fit['dim'];
+                    $base_layout = $font_fit['layout'];
+                    break;
+            }
+
+            $lines = $base_layout['lines'];
+            $txt_pheight = $base_layout['txtheight'];
+        }
+
+        return [
+            'ordarr' => $ordarr,
+            'dim' => $dim,
+            'lines' => $lines,
+            'txtheight' => $txt_pheight,
+            'line_width_points' => $line_width_points,
+            'fontout_prefix' => $fontout_prefix,
+            'restore_font' => $restore_font,
+            'restore_font_output' => $restore_font_output,
+            'fontout_restore' => $fontout_restore,
+        ];
+    }
+
+    /**
+     * Compute text layout data for a text cell.
+     *
+     * @param array<int, int> $ordarr
+     * @param TTextDims $dim
+     *
+     * @return array{lines: array<int, TextLinePos>, maxwidth: float, txtheight: float}
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     */
+    protected function getTextCellLayout(
+        array $ordarr,
+        array $dim,
+        float $splitWidth,
+        float $displayWidth,
+        float $scale,
+        float $offsetPoints,
+        float $lineSpacePoints,
+    ): array {
+        if ($ordarr === [] || $splitWidth <= 0 || $displayWidth <= 0 || $scale <= 0) {
+            return [
+                'lines' => [],
+                'maxwidth' => 0.0,
+                'txtheight' => 0.0,
+            ];
+        }
+
+        $lines = $this->splitLines($ordarr, $dim, $splitWidth, $offsetPoints);
+        $numlines = \count($lines);
+
+        $maxwidth = 0.0;
+        foreach ($lines as $line) {
+            $linewidth = $line['totwidth'];
+            if ($linewidth > $maxwidth) {
+                $maxwidth = $linewidth;
+            }
+        }
+
+        $curfont = $this->font->getCurrentFont();
+        $txtheight = 0.0;
+        if ($numlines > 0) {
+            $txtheight = ($numlines * $curfont['height']) + (($numlines - 1) * $lineSpacePoints);
+        }
+
+        return [
+            'lines' => $lines,
+            'maxwidth' => $maxwidth * $scale,
+            'txtheight' => $txtheight,
+        ];
+    }
+
+    /**
+     * Returns true when text layout exceeds available inner width or height.
+     *
+     * @param array{maxwidth: float, txtheight: float, lines?: array<int, TextLinePos>} $layout
+     */
+    protected function textCellLayoutOverflows(array $layout, float $maxWidth, float $maxHeight): bool
+    {
+        return (
+            $layout['maxwidth'] > ($maxWidth + self::LINE_FIT_EPSILON)
+            || $layout['txtheight'] > ($maxHeight + self::LINE_FIT_EPSILON)
+        );
+    }
+
+    /**
+     * Returns true when text layout exceeds available inner width.
+     *
+     * @param array{maxwidth: float, txtheight: float, lines?: array<int, TextLinePos>} $layout
+     */
+    protected function textCellLayoutWidthOverflows(array $layout, float $maxWidth): bool
+    {
+        return $layout['maxwidth'] > ($maxWidth + self::LINE_FIT_EPSILON);
+    }
+
+    /**
+     * Fit text by truncation and append a truncation marker.
+     *
+     * @param array<int, int> $ordarr
+     *
+     * @return array<int, int>
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     */
+    protected function fitTextCellByTruncation(
+        array $ordarr,
+        float $maxWidth,
+        float $maxHeight,
+        float $offsetPoints,
+        float $lineSpacePoints,
+    ): array {
+        if ($ordarr === [] || $maxWidth <= 0 || $maxHeight <= 0) {
+            return [];
+        }
+
+        $dim = $this->font->getOrdArrDims($ordarr);
+        $layout = $this->getTextCellLayout($ordarr, $dim, $maxWidth, $maxWidth, 1.0, $offsetPoints, $lineSpacePoints);
+        if (!$this->textCellLayoutOverflows($layout, $maxWidth, $maxHeight)) {
+            return $ordarr;
+        }
+
+        $marker = $this->getTextCellTruncationMarkerOrdArr();
+        $marker_dim = $this->font->getOrdArrDims($marker);
+        $marker_layout = $this->getTextCellLayout(
+            $marker,
+            $marker_dim,
+            $maxWidth,
+            $maxWidth,
+            1.0,
+            $offsetPoints,
+            $lineSpacePoints,
+        );
+        if ($this->textCellLayoutOverflows($marker_layout, $maxWidth, $maxHeight)) {
+            return [];
+        }
+
+        $total = \count($ordarr);
+        $low = 0;
+        $high = $total;
+        $best = -1;
+
+        while ($low <= $high) {
+            $mid = \intdiv($low + $high, 2);
+            $candidate = \array_slice($ordarr, 0, $mid);
+            if ($mid < $total) {
+                $candidate = \array_merge($candidate, $marker);
+            }
+
+            $candidate_dim = $this->font->getOrdArrDims($candidate);
+            $candidate_layout = $this->getTextCellLayout(
+                $candidate,
+                $candidate_dim,
+                $maxWidth,
+                $maxWidth,
+                1.0,
+                $offsetPoints,
+                $lineSpacePoints,
+            );
+
+            if (!$this->textCellLayoutOverflows($candidate_layout, $maxWidth, $maxHeight)) {
+                $best = $mid;
+                $low = $mid + 1;
+            } else {
+                $high = $mid - 1;
+            }
+        }
+
+        if ($best < 0) {
+            return [];
+        }
+
+        $trimmed = \array_slice($ordarr, 0, $best);
+        if ($best < $total) {
+            $trimmed = \array_merge($trimmed, $marker);
+        }
+
+        return $trimmed;
+    }
+
+    /**
+     * Returns truncation marker ordinals (ellipsis if available, otherwise three dots).
+     *
+     * @return array<int, int>
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     */
+    protected function getTextCellTruncationMarkerOrdArr(): array
+    {
+        if ($this->font->isCharDefined(0x2026)) {
+            return [0x2026];
+        }
+
+        return [46, 46, 46];
+    }
+
+    /**
+     * Fit text by horizontal glyph scaling.
+     *
+     * @param array<int, int> $ordarr
+     * @param TTextDims $dim
+     *
+     * @return array{fontchanged: bool, linewidth: float, layout: array{lines: array<int, TextLinePos>, maxwidth: float, txtheight: float}}
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     */
+    protected function fitTextCellByStretch(
+        array $ordarr,
+        array $dim,
+        float $maxWidth,
+        float $maxHeight,
+        float $offsetPoints,
+        float $lineSpacePoints,
+    ): array {
+        $base = $this->getTextCellLayout($ordarr, $dim, $maxWidth, $maxWidth, 1.0, $offsetPoints, $lineSpacePoints);
+        if (!$this->textCellLayoutOverflows($base, $maxWidth, $maxHeight)) {
+            return [
+                'fontchanged' => false,
+                'linewidth' => $maxWidth,
+                'layout' => $base,
+            ];
+        }
+
+        $best_stretch = 100.0;
+        $best_layout = $base;
+
+        $probe_stretch = self::TEXTCELL_MIN_STRETCH;
+        $probe_split = $maxWidth * (100.0 / $probe_stretch);
+        $probe_layout = $this->getTextCellLayout(
+            $ordarr,
+            $dim,
+            $probe_split,
+            $maxWidth,
+            $probe_stretch / 100.0,
+            $offsetPoints,
+            $lineSpacePoints,
+        );
+
+        if (!$this->textCellLayoutOverflows($probe_layout, $maxWidth, $maxHeight)) {
+            $low = self::TEXTCELL_MIN_STRETCH;
+            $high = 100.0;
+            $best_stretch = $probe_stretch;
+            $best_layout = $probe_layout;
+
+            for ($iter = 0; $iter < 12; ++$iter) {
+                $mid = ($low + $high) / 2.0;
+                $mid_split = $maxWidth * (100.0 / $mid);
+                $mid_layout = $this->getTextCellLayout(
+                    $ordarr,
+                    $dim,
+                    $mid_split,
+                    $maxWidth,
+                    $mid / 100.0,
+                    $offsetPoints,
+                    $lineSpacePoints,
+                );
+
+                if ($this->textCellLayoutOverflows($mid_layout, $maxWidth, $maxHeight)) {
+                    $high = $mid;
+                    continue;
+                }
+
+                $low = $mid;
+                $best_stretch = $mid;
+                $best_layout = $mid_layout;
+            }
+        } else {
+            // Even at minimum stretch the layout still overflows.
+            // If the overflow is still a width overflow, apply best-effort compression.
+            // If only height overflows (compression cannot reduce line count), skip.
+            if (!$this->textCellLayoutWidthOverflows($probe_layout, $maxWidth)) {
+                return [
+                    'fontchanged' => false,
+                    'linewidth' => $maxWidth,
+                    'layout' => $base,
+                ];
+            }
+
+            $best_stretch = self::TEXTCELL_MIN_STRETCH;
+            $best_layout = $probe_layout;
+        }
+
+        if ($best_stretch >= (100.0 - self::LINE_FIT_EPSILON)) {
+            return [
+                'fontchanged' => false,
+                'linewidth' => $maxWidth,
+                'layout' => $best_layout,
+            ];
+        }
+
+        $curfont = $this->font->getCurrentFont();
+        $this->font->cloneFont($this->pon, $curfont['idx'], null, null, $curfont['spacing'], $best_stretch);
+
+        return [
+            'fontchanged' => true,
+            'linewidth' => $maxWidth * (100.0 / $best_stretch),
+            'layout' => $best_layout,
+        ];
+    }
+
+    /**
+     * Fit text by reducing font size.
+     *
+     * @param array<int, int> $ordarr
+     *
+     * @return array{fontchanged: bool, fontout: string, dim: TTextDims, layout: array{lines: array<int, TextLinePos>, maxwidth: float, txtheight: float}}
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     */
+    protected function fitTextCellByFontSize(
+        array $ordarr,
+        float $maxWidth,
+        float $maxHeight,
+        float $offsetPoints,
+        float $lineSpacePoints,
+    ): array {
+        $basedim = $this->font->getOrdArrDims($ordarr);
+        $base = $this->getTextCellLayout($ordarr, $basedim, $maxWidth, $maxWidth, 1.0, $offsetPoints, $lineSpacePoints);
+        if (!$this->textCellLayoutOverflows($base, $maxWidth, $maxHeight)) {
+            return [
+                'fontchanged' => false,
+                'fontout' => '',
+                'dim' => $basedim,
+                'layout' => $base,
+            ];
+        }
+
+        $curfont = $this->font->getCurrentFont();
+        $current_size = $curfont['size'];
+        if ($current_size <= self::TEXTCELL_MIN_FONTSIZE) {
+            return [
+                'fontchanged' => false,
+                'fontout' => '',
+                'dim' => $basedim,
+                'layout' => $base,
+            ];
+        }
+
+        $ratio_w = $base['maxwidth'] > 0 ? $maxWidth / $base['maxwidth'] : 1.0;
+        $ratio_h = $base['txtheight'] > 0 ? $maxHeight / $base['txtheight'] : 1.0;
+        $target_size = $current_size * \min($ratio_w, $ratio_h);
+        $target_size = \max(self::TEXTCELL_MIN_FONTSIZE, \min($current_size, $target_size));
+
+        $probe = $this->probeTextCellFontSizeFit(
+            $ordarr,
+            $target_size,
+            $maxWidth,
+            $maxHeight,
+            $offsetPoints,
+            $lineSpacePoints,
+        );
+        $best_size = $probe['size'];
+        $best_dim = $probe['dim'];
+        $best_layout = $probe['layout'];
+
+        if ($probe['fits']) {
+            $low = $best_size;
+            $high = $current_size;
+
+            for ($iter = 0; $iter < 12; ++$iter) {
+                $mid = ($low + $high) / 2.0;
+                $mid_eval = $this->probeTextCellFontSizeFit(
+                    $ordarr,
+                    $mid,
+                    $maxWidth,
+                    $maxHeight,
+                    $offsetPoints,
+                    $lineSpacePoints,
+                );
+
+                if (!$mid_eval['fits']) {
+                    $high = $mid;
+                    continue;
+                }
+
+                $low = $mid;
+                $best_size = $mid_eval['size'];
+                $best_dim = $mid_eval['dim'];
+                $best_layout = $mid_eval['layout'];
+            }
+        } else {
+            $min_eval = $this->probeTextCellFontSizeFit(
+                $ordarr,
+                self::TEXTCELL_MIN_FONTSIZE,
+                $maxWidth,
+                $maxHeight,
+                $offsetPoints,
+                $lineSpacePoints,
+            );
+            if (!$min_eval['fits']) {
+                $best_size = $min_eval['size'];
+                $best_dim = $min_eval['dim'];
+                $best_layout = $min_eval['layout'];
+            } else {
+                $low = $min_eval['size'];
+                $high = $best_size;
+                $best_size = $min_eval['size'];
+                $best_dim = $min_eval['dim'];
+                $best_layout = $min_eval['layout'];
+
+                for ($iter = 0; $iter < 12; ++$iter) {
+                    $mid = ($low + $high) / 2.0;
+                    $mid_eval = $this->probeTextCellFontSizeFit(
+                        $ordarr,
+                        $mid,
+                        $maxWidth,
+                        $maxHeight,
+                        $offsetPoints,
+                        $lineSpacePoints,
+                    );
+
+                    if (!$mid_eval['fits']) {
+                        $high = $mid;
+                        continue;
+                    }
+
+                    $low = $mid;
+                    $best_size = $mid_eval['size'];
+                    $best_dim = $mid_eval['dim'];
+                    $best_layout = $mid_eval['layout'];
+                }
+            }
+        }
+
+        if ($best_size >= ($current_size - self::LINE_FIT_EPSILON)) {
+            return [
+                'fontchanged' => false,
+                'fontout' => '',
+                'dim' => $basedim,
+                'layout' => $base,
+            ];
+        }
+
+        $applied = $this->font->cloneFont($this->pon, $curfont['idx'], null, $best_size);
+
+        return [
+            'fontchanged' => true,
+            'fontout' => $applied['out'],
+            'dim' => $best_dim,
+            'layout' => $best_layout,
+        ];
+    }
+
+    /**
+     * Probe a candidate font size and return the resulting layout.
+     *
+     * @param array<int, int> $ordarr
+     *
+     * @return array{size: float, dim: TTextDims, layout: array{lines: array<int, TextLinePos>, maxwidth: float, txtheight: float}, fits: bool}
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     */
+    protected function probeTextCellFontSizeFit(
+        array $ordarr,
+        float $size,
+        float $maxWidth,
+        float $maxHeight,
+        float $offsetPoints,
+        float $lineSpacePoints,
+    ): array {
+        $curfont = $this->font->getCurrentFont();
+        $this->font->cloneFont($this->pon, $curfont['idx'], null, $size);
+        try {
+            $dim = $this->font->getOrdArrDims($ordarr);
+            $layout = $this->getTextCellLayout(
+                $ordarr,
+                $dim,
+                $maxWidth,
+                $maxWidth,
+                1.0,
+                $offsetPoints,
+                $lineSpacePoints,
+            );
+        } finally {
+            $this->font->popLastFont();
+        }
+
+        return [
+            'size' => $size,
+            'dim' => $dim,
+            'layout' => $layout,
+            'fits' => !$this->textCellLayoutOverflows($layout, $maxWidth, $maxHeight),
+        ];
+    }
+
+    /**
+     * Wrap a semantic text block with a PDF/UA marked-content sequence.
+     *
+     * If a structure element bracket is open (via beginStructElem) the MCID is registered
+     * to that element and the BDC tag uses the open element's role. Otherwise an implicit
+     * /P element is auto-opened and auto-closed so that direct addTextCell() calls outside
+     * HTML rendering are still properly tagged.
+     */
+    protected function tagPdfUaTextContent(string $content, int $pid, string $actualText = ''): string
+    {
+        if ($this->pdfuaMode === '') {
+            return $content;
+        }
+
+        $mcid = $this->pdfuapagemcid[$pid] ?? 0;
+        $stackTop = \array_key_last($this->pdfuaStructStack);
+        $role = $stackTop !== null && isset($this->pdfuaStructStack[$stackTop])
+            ? $this->pdfuaStructStack[$stackTop]['role']
+            : 'P';
+        $atEntry = '';
+        if ($actualText !== '') {
+            $atEntry = ' /ActualText ' . $this->formatPdfUaActualText($actualText);
+        }
+        $open = '/' . $role . ' <</MCID ' . $mcid . $atEntry . '>> BDC' . "\n";
+        $close = 'EMC' . "\n";
+
+        // addTextCell output may contain multiple BT...ET text sections for wrapped lines.
+        // Tag the whole text span by inserting BDC before the first BT and EMC after the last ET.
+        $firstBt = \strpos($content, 'BT ');
+        $lastEt = \strrpos($content, ' ET');
+        if ($firstBt === false || $lastEt === false || $lastEt < $firstBt) {
+            return $content;
+        }
+
+        $etEnd = $lastEt + 3;
+        if (isset($content[$etEnd]) && $content[$etEnd] === "\n") {
+            ++$etEnd;
+        }
+
+        $wrapped =
+            \substr($content, 0, $firstBt)
+            . $open
+            . \substr($content, $firstBt, $etEnd - $firstBt)
+            . $close
+            . \substr($content, $etEnd);
+
+        $this->pdfuapagemcid[$pid] = $mcid + 1;
+
+        // Register this MCID.
+        if ($stackTop !== null && isset($this->pdfuaStructStack[$stackTop])) {
+            // Assign to the top open struct elem.
+            $stackEntry = $this->pdfuaStructStack[$stackTop];
+            $stackEntry['mcids'][] = $mcid;
+            $stackEntry['kids'][] = [
+                'type' => 'mcid',
+                'id' => $mcid,
+            ];
+            $this->pdfuaStructStack[$stackTop] = $stackEntry;
+        } else {
+            // No open bracket: auto-log an implicit /P element.
+            $this->pdfuaStructLog[] = [
+                'role' => 'P',
+                'pid' => $pid,
+                'mcids' => [$mcid],
+                'kids' => [[
+                    'type' => 'mcid',
+                    'id' => $mcid,
+                ]],
+            ];
+        }
+
+        return $wrapped;
+    }
+
+    /**
+     * Register an annotation object under the current open structure element.
+     *
+     * @param int $oid Annotation object ID.
+     * @param int $pid Page index (from addPage / getPageId).
+     */
+    protected function registerPdfUaAnnotation(int $oid, int $pid): void
+    {
+        if ($this->pdfuaMode === '' || $oid <= 0) {
+            return;
+        }
+
+        $stackTop = \array_key_last($this->pdfuaStructStack);
+        if ($stackTop !== null && isset($this->pdfuaStructStack[$stackTop])) {
+            $stackEntry = $this->pdfuaStructStack[$stackTop];
+            if (!isset($stackEntry['annots']) || $stackEntry['annots'] === []) {
+                $stackEntry['annots'] = [];
+            }
+
+            $stackEntry['annots'][] = $oid;
+            $this->pdfuaStructStack[$stackTop] = $stackEntry;
+            return;
+        }
+
+        $this->pdfuaStructLog[] = [
+            'role' => 'Link',
+            'pid' => $pid,
+            'mcids' => [],
+            'kids' => [],
+            'annots' => [$oid],
+        ];
+    }
+
+    /**
+     * Return a PDF hex string representing the given UTF-8 text as UTF-16BE with BOM,
+     * suitable for use as /ActualText in a marked-content BDC property list.
+     */
+    protected function formatPdfUaActualText(string $txt): string
+    {
+        $utf16 = "\xFE\xFF" . $this->uniconv->toUTF16BE($txt);
+        return '<' . \bin2hex($utf16) . '>';
+    }
+
+    /**
+     * Inspect a codepoint array and return the Unicode-decomposed UTF-8 equivalent
+     * if any codepoints are known ligatures or multi-character glyphs that require
+     * /ActualText for PDF/UA §7.2 compliance.
+     * Returns an empty string if no ActualText is needed.
+     *
+     * @param array<int, int> $ordarr Array of Unicode codepoints.
+     *
+     * @throws \Com\Tecnick\Unicode\Exception
+     */
+    protected function getActualTextForOrdarr(array $ordarr): string
+    {
+        $needsActual = false;
+        $result = '';
+        foreach ($ordarr as $cp) {
+            if (isset(self::LIGATURE_MAP[$cp])) {
+                $needsActual = true;
+                $result .= self::LIGATURE_MAP[$cp];
+            } else {
+                $result .= $this->uniconv->chr($cp);
+            }
+        }
+        return $needsActual ? $result : '';
+    }
+
+    /**
+     * Wrap non-text content (such as images) with a PDF/UA Figure marked-content sequence.
+     *
+     * The generated MCID is logged as a standalone Figure structure element and can include
+     * an alternate description via the StructElem /Alt entry.
+     */
+    protected function tagPdfUaFigureContent(string $content, int $pid, string $alt = ''): string
+    {
+        if ($this->pdfuaMode === '' || $content === '') {
+            return $content;
+        }
+
+        $mcid = $this->pdfuapagemcid[$pid] ?? 0;
+        $this->pdfuapagemcid[$pid] = $mcid + 1;
+
+        $stackTop = \array_key_last($this->pdfuaStructStack);
+        if (
+            $stackTop !== null
+            && isset($this->pdfuaStructStack[$stackTop])
+            && $this->pdfuaStructStack[$stackTop]['role'] === 'Figure'
+        ) {
+            // Already inside an open Figure bracket (e.g. from a <figure> HTML tag).
+            // Assign the MCID directly to that bracket so we don't produce Figure > Figure.
+            $stackEntry = $this->pdfuaStructStack[$stackTop];
+            $stackEntry['mcids'][] = $mcid;
+            $stackEntry['kids'][] = ['type' => 'mcid', 'id' => $mcid];
+            if ($alt !== '' && !isset($stackEntry['alt'])) {
+                $stackEntry['alt'] = $alt;
+            }
+
+            $this->pdfuaStructStack[$stackTop] = $stackEntry;
+        } else {
+            // No open Figure bracket — create a new Figure struct elem entry.
+            $entry = [
+                'role' => 'Figure',
+                'pid' => $pid,
+                'mcids' => [$mcid],
+                'kids' => [[
+                    'type' => 'mcid',
+                    'id' => $mcid,
+                ]],
+            ];
+            if ($alt !== '') {
+                $entry['alt'] = $alt;
+            }
+
+            $entryIndex = \count($this->pdfuaStructLog);
+            $this->pdfuaStructLog[] = $entry;
+
+            if ($stackTop !== null && isset($this->pdfuaStructStack[$stackTop])) {
+                $stackEntry = $this->pdfuaStructStack[$stackTop];
+                $stackEntry['kids'][] = ['type' => 'elem', 'id' => $entryIndex];
+                $this->pdfuaStructStack[$stackTop] = $stackEntry;
+            }
+        }
+
+        $open = '/Figure <</MCID ' . $mcid . '>> BDC' . "\n";
+        $close = 'EMC' . "\n";
+        if (!\str_ends_with($content, "\n")) {
+            $content .= "\n";
+        }
+
+        return $open . $content . $close;
+    }
+
+    /**
+     * Wrap non-semantic content in an Artifact marked-content sequence.
+     */
+    protected function tagPdfUaArtifactContent(string $content, string $type = '', string $subtype = ''): string
+    {
+        if ($this->pdfuaMode === '' || $content === '') {
+            return $content;
+        }
+
+        if (!\str_ends_with($content, "\n")) {
+            $content .= "\n";
+        }
+
+        return $this->beginArtifact($type, $subtype) . $content . $this->endArtifact();
+    }
+
+    /**
+     * Normalize a token for use as PDF Name object value.
+     */
+    protected function normalizePdfName(string $name): string
+    {
+        return \preg_replace('/[^A-Za-z0-9_\-]/', '', $name) ?? '';
+    }
+
+    /**
+     * Returns the PDF code to render a contiguous text block with automatic line breaks.
+     *
+     * @param array<int, int> $ordarr  Array of UTF-8 codepoints (integer values).
+     * @param array<int, TextLinePos> $lines    Array of lines metrics.
+     * @param float       $posx        Abscissa of upper-left corner.
+     * @param float       $posy        Ordinate of upper-left corner.
+     * @param float       $width       Width.
+     * @param float       $offset      Horizontal offset to apply to the line start.
+     * @param float       $fontascent  Font ascent in user units.
+     * @param float       $linespace   Additional space to add between lines.
+     * @param float       $strokewidth Stroke width.
+     * @param float       $wordspacing Word spacing (use it only when justify == false).
+     * @param float       $leading     Leading.
+     * @param float       $rise        Text rise.
+     * @param string      $halign      Text horizontal alignment inside the cell: L=left; C=center; R=right; J=justify.
+     * @param bool        $jlast       If true does not justify the last line when $halign == J.
+     * @param bool        $fill        If true fills the text.
+     * @param bool        $stroke      If true stroke the text.
+     * @param bool        $underline   If true underline the text.
+     * @param bool        $linethrough If true line through the text.
+     * @param bool        $overline    If true overline the text.
+     * @param bool        $clip        If true activate clipping mode.
+     * @param ?TextShadow $shadow      Text shadow parameters.
+     *
+     * @return string PDF code to render the text.
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     * @throws \Com\Tecnick\Pdf\Page\Exception
+     */
+    protected function outTextLines(
+        array $ordarr,
+        array $lines,
+        float $posx,
+        float $posy,
+        float $width,
+        float $offset,
+        float $fontascent,
+        float $linespace = 0,
+        float $strokewidth = 0,
+        float $wordspacing = 0,
+        float $leading = 0,
+        float $rise = 0,
+        string $halign = '',
+        bool $jlast = true,
+        bool $fill = true,
+        bool $stroke = false,
+        bool $underline = false,
+        bool $linethrough = false,
+        bool $overline = false,
+        bool $clip = false,
+        ?array $shadow = null,
+    ): string {
+        if ($ordarr === [] || $lines === []) {
+            return '';
+        }
+
+        if ($halign === '') {
+            $halign = $this->rtl ? 'R' : 'L';
+        }
+
+        $firstlinehalign = $halign;
+        if ($halign === 'c') {
+            $halign = 'C';
+            $firstlinehalign = 'L';
+        } elseif ($halign === 'r') {
+            $halign = 'R';
+            $firstlinehalign = 'L';
+        }
+
+        $num_lines = \count($lines);
+        $lastline = $num_lines - 1;
+        $hasTextBBox = false;
+        $minx = 0.0;
+        $miny = 0.0;
+        $maxx = 0.0;
+        $maxy = 0.0;
+
+        $line_posx = $posx + $offset;
+        $line_posy = $posy + $fontascent;
+
+        $out = '';
+        foreach ($lines as $i => $data) {
+            $line_ordarr = \array_slice($ordarr, $data['pos'], $data['chars']);
+            $line_ordarr = $this->removeOrdArrSoftHyphens($line_ordarr);
+            $line_txt = \implode('', $this->uniconv->ordArrToChrArr($line_ordarr));
+            $line_dim = [
+                'chars' => $data['chars'],
+                'spaces' => $data['spaces'],
+                'totwidth' => $data['totwidth'],
+                'totspacewidth' => $data['totspacewidth'],
+                'words' => $data['words'],
+                'split' => [],
+            ];
+
+            $cell_width = $width - $offset;
+            $line_halign = $i === 0 ? $firstlinehalign : $halign;
+            $txt_posx = $this->toUnit($this->textHPosFromCell(
+                $this->toPoints($line_posx),
+                $this->toPoints($cell_width),
+                $line_dim['totwidth'],
+                $line_halign,
+                static::ZEROCELL,
+            ));
+
+            $jwidth = 0;
+            $line_ws = $wordspacing;
+            if ($halign === 'J' && $data['septype'] !== 'B' && ($i < $lastline || !$jlast)) {
+                $jwidth = $cell_width;
+            }
+
+            // When custom inline word spacing is active (multi-fragment justified
+            // paragraph), the first line uses the pre-computed word spacing while
+            // wrapped continuation lines use per-line justification instead.
+            if ($wordspacing > 0 && $i > 0) {
+                $line_ws = 0;
+                if ($data['septype'] !== 'B' && ($i < $lastline || !$jlast)) {
+                    $jwidth = $cell_width;
+                }
+            }
+
+            $out .= $this->getOutTextLine(
+                $line_txt,
+                $line_ordarr,
+                $line_dim,
+                $txt_posx,
+                $line_posy,
+                $jwidth,
+                $strokewidth,
+                $line_ws,
+                $leading,
+                $rise,
+                $fill,
+                $stroke,
+                $underline,
+                $linethrough,
+                $overline,
+                $clip,
+                $shadow,
+            );
+
+            $offset = 0;
+            $line_posx = $posx;
+            $bbox = $this->getLastBBox();
+            if (!$hasTextBBox) {
+                $hasTextBBox = true;
+                $minx = $bbox['x'];
+                $miny = $bbox['y'];
+                $maxx = $bbox['x'] + $bbox['w'];
+                $maxy = $bbox['y'] + $bbox['h'];
+            } else {
+                $minx = \min($minx, $bbox['x']);
+                $miny = \min($miny, $bbox['y']);
+                $maxx = \max($maxx, $bbox['x'] + $bbox['w']);
+                $maxy = \max($maxy, $bbox['y'] + $bbox['h']);
+            }
+            $line_posy = $bbox['y'] + $bbox['h'] + $fontascent + $linespace;
+        }
+
+        $this->textbbox[] = [
+            'x' => $minx,
+            'y' => $miny,
+            'w' => $maxx - $minx,
+            'h' => $maxy - $miny,
+        ];
+
+        return $out;
+    }
+
+    /**
+     * Returns the PDF code to render a single line of text.
+     *
+     * @param string      $txt         Text string to be processed.
+     * @param float       $posx        X position relative to the start of the current line.
+     * @param float       $posy        Y position relative to the start of the current line (font baseline).
+     * @param float       $width       Desired string width to force justification via word spacing (0 = automatic).
+     * @param float       $strokewidth Stroke width.
+     * @param float       $wordspacing Word spacing (use it only when width == 0).
+     * @param float       $leading     Leading.
+     * @param float       $rise        Text rise.
+     * @param bool        $fill        If true fills the text.
+     * @param bool        $stroke      If true stroke the text.
+     * @param bool        $underline   If true underline the text.
+     * @param bool        $linethrough If true line through the text.
+     * @param bool        $overline    If true overline the text.
+     * @param bool        $clip        If true activate clipping mode.
+     * @param string      $forcedir    If 'R' forces RTL, if 'L' forces LTR.
+     * @param string      $txtanchor   Text anchor position: 'S'=start (default), 'M'=middle, 'E'=end.
+     * @param ?TextShadow $shadow      Text shadow parameters.
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     * @throws \Com\Tecnick\Unicode\Exception
+     * @throws \Com\Tecnick\Pdf\Page\Exception
+     */
+    public function getTextLine(
+        string $txt,
+        float $posx = 0,
+        float $posy = 0,
+        float $width = 0,
+        float $strokewidth = 0,
+        float $wordspacing = 0,
+        float $leading = 0,
+        float $rise = 0,
+        bool $fill = true,
+        bool $stroke = false,
+        bool $underline = false,
+        bool $linethrough = false,
+        bool $overline = false,
+        bool $clip = false,
+        string $forcedir = '',
+        string $txtanchor = '',
+        ?array $shadow = null,
+    ): string {
+        if ($txt === '') {
+            return '';
+        }
+
+        $ordarr = [];
+        $dim = self::DIM_DEFAULT;
+        $this->prepareText($txt, $ordarr, $dim, $forcedir);
+        $totWidth = $dim['totwidth'];
+
+        switch ($txtanchor) {
+            case 'M':
+                if ($this->rtl || $forcedir === 'R') {
+                    $posx += $totWidth / 2;
+                    break;
+                }
+                $posx -= $totWidth / 2;
+                break;
+            case 'E':
+                if ($this->rtl || $forcedir === 'R') {
+                    $posx += $totWidth;
+                    break;
+                }
+                $posx -= $totWidth;
+                break;
+            default:
+                // do nothing
+                break;
+        }
+
+        return $this->getOutTextLine(
+            $txt,
+            $ordarr,
+            $dim,
+            $posx,
+            $posy,
+            $width,
+            $strokewidth,
+            $wordspacing,
+            $leading,
+            $rise,
+            $fill,
+            $stroke,
+            $underline,
+            $linethrough,
+            $overline,
+            $clip,
+            $shadow,
+        );
+    }
+
+    /**
+     * Returns the PDF code to render a single line of text.
+     *
+     * @param string      $txt         Text string to be processed.
+     * @param array<int, int> $ordarr  Array of UTF-8 codepoints (integer values).
+     * @param TTextDims   $dim         Array of dimensions
+     * @param float       $posx        X position relative to the start of the current line.
+     * @param float       $posy        Y position relative to the start of the current line (font baseline).
+     * @param float       $width       Desired string width to force justification via word spacing (0 = automatic).
+     * @param float       $strokewidth Stroke width.
+     * @param float       $wordspacing Word spacing (use it only when width == 0).
+     * @param float       $leading     Leading.
+     * @param float       $rise        Text rise.
+     * @param bool        $fill        If true fills the text.
+     * @param bool        $stroke      If true stroke the text.
+     * @param bool        $underline   If true underline the text.
+     * @param bool        $linethrough If true line through the text.
+     * @param bool        $overline    If true overline the text.
+     * @param bool        $clip        If true activate clipping mode.
+     * @param ?TextShadow $shadow      Text shadow parameters.
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     * @throws \Com\Tecnick\Pdf\Page\Exception
+     */
+    protected function getOutTextLine(
+        string $txt,
+        array $ordarr,
+        array $dim,
+        float $posx = 0,
+        float $posy = 0,
+        float $width = 0,
+        float $strokewidth = 0,
+        float $wordspacing = 0,
+        float $leading = 0,
+        float $rise = 0,
+        bool $fill = true,
+        bool $stroke = false,
+        bool $underline = false,
+        bool $linethrough = false,
+        bool $overline = false,
+        bool $clip = false,
+        ?array $shadow = null,
+    ): string {
+        if ($txt === '' || $ordarr === []) {
+            return '';
+        }
+
+        $out = '';
+
+        if ($shadow !== null && $shadow !== []) {
+            if ($shadow['xoffset'] < 0) {
+                $posx += $shadow['xoffset'];
+            }
+
+            if ($shadow['yoffset'] < 0) {
+                $posy += $shadow['yoffset'];
+            }
+
+            $out .= $this->graph->getStartTransform();
+            $out .= $this->color->getPdfFillColor($shadow['color']);
+            if ($this->isTransparencyAllowed()) {
+                $out .= $this->graph->getAlpha($shadow['opacity'], $shadow['mode']);
+            }
+            $out .= $this->outTextLine(
+                $txt,
+                $ordarr,
+                $dim,
+                $posx + $shadow['xoffset'],
+                $posy + $shadow['yoffset'],
+                $width,
+                0,
+                $wordspacing,
+                $leading,
+                $rise,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+            );
+            $out .= $this->graph->getStopTransform();
+        }
+
+        return $out
+        . $this->outTextLine(
+            $txt,
+            $ordarr,
+            $dim,
+            $posx,
+            $posy,
+            $width,
+            $strokewidth,
+            $wordspacing,
+            $leading,
+            $rise,
+            $fill,
+            $stroke,
+            $underline,
+            $linethrough,
+            $overline,
+            $clip,
+        );
+    }
+
+    /**
+     * Cleanup the input text, convert it to UTF-8 array and get the dimensions.
+     *
+     * @param string          $txt      Clean text string to be processed.
+     * @param array<int, int> $ordarr   Array of UTF-8 codepoints (integer values).
+     * @param TTextDims $dim Array of dimensions
+     * @param string          $forcedir If 'R' forces RTL, if 'L' forces LTR.
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     * @throws \Com\Tecnick\Unicode\Exception
+     */
+    protected function prepareText(string &$txt, array &$ordarr, array &$dim, string $forcedir = ''): void
+    {
+        if ($txt === '') {
+            return;
+        }
+
+        $txt = $this->cleanupText($txt);
+        /** @var array<int, int> $ordarr */
+        $ordarr = \array_values($this->uniconv->strToOrdArr($txt));
+
+        if ($this->isunicode && !$this->font->isCurrentByteFont()) {
+            $bidi = new Bidi($txt, null, $ordarr, $forcedir);
+            /** @var array<int, int> $bidiarr */
+            $bidiarr = \array_values($bidi->getOrdArray());
+            $ordarr = $this->replaceUnicodeChars($bidiarr);
+        }
+
+        if ($this->hyphen_patterns !== []) {
+            $ordarr = $this->hyphenateTextOrdArr($this->hyphen_patterns, $ordarr);
+        }
+
+        if ($this->autozerowidthbreaks) {
+            $ordarr = $this->addOrdArrBreakPoints($ordarr);
+        }
+
+        $dim = $this->font->getOrdArrDims($ordarr);
+    }
+
+    /**
+     * Split the text into lines to fit the specified width.
+     *
+     * @param array<int, int> $ordarr   Array of UTF-8 codepoints (integer values).
+     * @param TTextDims       $dim      Array of dimensions.
+     * @param float           $pwidth   Max line width in internal points.
+     * @param float           $poffset  Horizontal offset to apply to the line start in internal points.
+     *
+     * @return array<int, TextLinePos> Array of lines metrics.
+     *
+     * @param TTextDims       $dim
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     */
+    protected function splitLines(array $ordarr, array $dim, float $pwidth, float $poffset = 0): array
+    {
+        if ($ordarr === []) {
+            // no lines
+            return [];
+        }
+
+        $line_width = $pwidth - $poffset;
+
+        $dimTotWidth = $dim['totwidth'];
+        $dimChars = $dim['chars'];
+        $dimSpaces = $dim['spaces'];
+        $dimTotSpaceWidth = $dim['totspacewidth'];
+        $dimWords = $dim['words'];
+        $split = $dim['split'];
+
+        $hasExplicitLineBreak = false;
+        foreach ($split as $splitData) {
+            if ($splitData['septype'] !== 'B') {
+                continue;
+            }
+
+            $hasExplicitLineBreak = true;
+            break;
+        }
+
+        if (!$hasExplicitLineBreak && $dimTotWidth <= ($line_width + self::LINE_FIT_EPSILON)) {
+            // the input text fits in a single line
+            return [[
+                'pos' => 0,
+                'chars' => $dimChars,
+                'spaces' => $dimSpaces,
+                'septype' => 'BN',
+                'totwidth' => $dimTotWidth,
+                'totspacewidth' => $dimTotSpaceWidth,
+                'words' => $dimWords,
+            ]];
+        }
+
+        $lines = [];
+        $posstart = 0;
+        $posend = 0;
+        $prev_spaces = 0;
+        $prev_totwidth = 0;
+        $prev_totspacewidth = 0;
+        $prev_words = 0;
+        $num_words = \count($split);
+        $soft_hyphen_width = $this->font->getCharWidth(UnicodeConstant::HYPHEN);
+
+        for ($word = 0; $word < $num_words; $word++) {
+            $data = $split[$word] ?? null;
+            if ($data === null) {
+                continue;
+            }
+
+            $dataTotWidth = $data['totwidth'];
+            $curwidth = $dataTotWidth - $prev_totwidth;
+            $overline = $curwidth > ($line_width + self::LINE_FIT_EPSILON);
+
+            if ($data['septype'] === 'B' || $overline) {
+                // the current word is a line break or does not fit in the current line
+                if ($overline && $word > 0) {
+                    // the current word does not fit in the current line
+                    $prevword = $word - 1;
+                    // avoid looping forever when moving back would not advance the line start
+                    if (isset($split[$prevword]) && (int) $split[$prevword]['pos'] >= $posstart) {
+                        $data = $split[$prevword];
+                        $dataTotWidth = $data['totwidth'];
+                        --$word;
+                    }
+                }
+
+                $posend = (int) $data['pos'];
+                $totwidth = $dataTotWidth;
+                $totspacewidth = $data['totspacewidth'];
+                $spaces = (int) $data['spaces'];
+                $septype = $data['septype'];
+
+                $sepend = 0;
+                $sepwidth = 0;
+                $ord = $data['ord'];
+                if ($ord === UnicodeConstant::SOFT_HYPHEN) {
+                    $sepend = 1;
+                    $sepwidth = $soft_hyphen_width;
+                }
+
+                $lines[] = [
+                    'pos' => $posstart,
+                    'chars' => $posend - $posstart + $sepend,
+                    'spaces' => $spaces - $prev_spaces,
+                    'septype' => $septype,
+                    'totwidth' => $totwidth - $prev_totwidth + $sepwidth,
+                    'totspacewidth' => $totspacewidth - $prev_totspacewidth,
+                    'words' => $word - $prev_words,
+                ];
+
+                $chrwidth = $this->font->getCharWidth($ord);
+                $prev_totwidth = $totwidth + $chrwidth;
+                $prev_totspacewidth = $totspacewidth;
+                $prev_spaces = $spaces;
+                if ($septype === 'WS') {
+                    ++$prev_spaces;
+                    $prev_totspacewidth += $chrwidth;
+                }
+                $prev_words = $word;
+                $line_width = $pwidth;
+                $posstart = $posend + 1; // skip word separator
+            }
+        }
+
+        if ($posstart < $dimChars) {
+            $lastWord = $dimWords - 1;
+            $last = $split[$lastWord] ?? null;
+            if ($last === null) {
+                return $lines;
+            }
+
+            $lastSpaces = (int) $last['spaces'];
+            $lastSepType = $last['septype'];
+            $lastTotWidth = $last['totwidth'];
+            $lastTotSpaceWidth = $last['totspacewidth'];
+            $lines[] = [
+                'pos' => $posstart,
+                'chars' => $dimChars - $posstart,
+                'spaces' => $lastSpaces - $prev_spaces,
+                'septype' => $lastSepType,
+                'totwidth' => $lastTotWidth - $prev_totwidth,
+                'totspacewidth' => $lastTotSpaceWidth - $prev_totspacewidth,
+                'words' => $dimWords - $prev_words,
+            ];
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Returns the PDF code to render a line of text.
+     *
+     * @param string          $txt         Clean text string to be processed.
+     * @param array<int, int> $ordarr      Array of UTF-8 codepoints (integer values).
+     * @param TTextDims       $dim         Array of dimensions.
+     * @param float           $posx        X position relative to the start of the current line.
+     * @param float           $posy        Y position relative to the start of the current line (font baseline).
+     * @param float           $width       Desired string width to force justification via word spacing (0 = automatic).
+     * @param float           $strokewidth Stroke width.
+     * @param float           $wordspacing Word spacing (use it only when width == 0).
+     * @param float           $leading     Leading.
+     * @param float           $rise        Text rise.
+     * @param bool            $fill        If true fills the text.
+     * @param bool            $stroke      If true stroke the text.
+     * @param bool            $underline   If true underline the text.
+     * @param bool            $linethrough If true line through the text.
+     * @param bool            $overline    If true overline the text.
+     * @param bool            $clip        If true activate clipping mode.
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     * @throws \Com\Tecnick\Pdf\Page\Exception
+     */
+    protected function outTextLine(
+        string $txt,
+        array $ordarr,
+        array $dim,
+        float $posx = 0,
+        float $posy = 0,
+        float $width = 0,
+        float $strokewidth = 0,
+        float $wordspacing = 0,
+        float $leading = 0,
+        float $rise = 0,
+        bool $fill = true,
+        bool $stroke = false,
+        bool $underline = false,
+        bool $linethrough = false,
+        bool $overline = false,
+        bool $clip = false,
+    ): string {
+        if ($txt === '' || $ordarr === []) {
+            return '';
+        }
+
+        $width = $width > 0 ? $width : 0;
+        $curfont = $this->font->getCurrentFont();
+        /** @var array{ascent: float, height: float, spacing: float, stretching: float, ut: float} $curfont */
+        $this->bbox[] = [
+            'x' => $posx,
+            'y' => $posy - $this->toUnit($curfont['ascent']),
+            'w' => $width,
+            'h' => $this->toUnit($curfont['height']),
+        ];
+
+        $out = $this->getJustifiedString($txt, $ordarr, $dim, $width);
+
+        $out = $this->getOutTextPosXY($out, $posx, $posy, 'Td');
+
+        $trmode = $this->getTextRenderingMode($fill, $stroke, $clip);
+        $out = $this->getOutTextStateOperatorw($out, $this->toPoints($strokewidth));
+        $out = $this->getOutTextStateOperatorTr($out, $trmode);
+        $out = $this->getOutTextStateOperatorTw($out, $this->toPoints($wordspacing));
+        $out = $this->getOutTextStateOperatorTc($out, $curfont['spacing']);
+        $out = $this->getOutTextStateOperatorTz($out, $curfont['stretching']);
+        $out = $this->getOutTextStateOperatorTL($out, $this->toPoints($leading));
+        $out = $this->getOutTextStateOperatorTs($out, $this->toPoints($rise));
+        $out = $this->getOutTextObject($out);
+
+        $bbox = $this->getLastBBox();
+        if ($underline) {
+            $out .= $this->getOutUTOLine(
+                $this->toPoints($bbox['x']),
+                $this->toYPoints($bbox['y'] + $bbox['h']),
+                $this->toPoints($bbox['w']),
+                $curfont['ut'],
+            );
+        }
+
+        if ($linethrough) {
+            $out .= $this->getOutUTOLine(
+                $this->toPoints($bbox['x']),
+                $this->toYPoints($bbox['y'] + ($bbox['h'] / 2)),
+                $this->toPoints($bbox['w']),
+                $curfont['ut'],
+            );
+        }
+
+        if ($overline) {
+            $out .= $this->getOutUTOLine(
+                $this->toPoints($bbox['x']),
+                $this->toYPoints($bbox['y']),
+                $this->toPoints($bbox['w']),
+                $curfont['ut'],
+            );
+        }
+
+        return $out;
+    }
+
+    /**
+     * Return the raw PDF command to print a graphic line.
+     * This is used for text underline, overline and line-through.
+     *
+     * @param float $pntx X position in internal points.
+     * @param float $pnty Y position in internal points.
+     * @param float $pwidth Line width in internal points.
+     * @param float $psize Line tickness in internal points.
+     *
+     * @return string Raw PDF data.
+     */
+    protected function getOutUTOLine(float $pntx, float $pnty, float $pwidth, float $psize): string
+    {
+        return \sprintf('%F %F %F %F re f' . "\n", $pntx, $pnty, $pwidth, $psize);
+    }
+
+    /**
+     * Returns the last text fragment bounding box [llx, lly, urx, ury].
+     *
+     * @return TBBox  Array of bounding box values.
+     */
+    public function getLastBBox(): array
+    {
+        if ($this->bbox === []) {
+            return self::BBOX_DEFAULT;
+        }
+        $idx = \count($this->bbox) - 1;
+        $item = $this->bbox[$idx] ?? null;
+        if ($item !== null) {
+            return $item;
+        }
+        return self::BBOX_DEFAULT;
+    }
+
+    /**
+     * Returns the last Text bounding box [llx, lly, urx, ury].
+     *
+     * @return TBBox  Array of bounding box values.
+     */
+    public function getLastTextBBox(): array
+    {
+        if ($this->textbbox === []) {
+            return self::BBOX_DEFAULT;
+        }
+        $idx = \count($this->textbbox) - 1;
+        $item = $this->textbbox[$idx] ?? null;
+        if ($item !== null) {
+            return $item;
+        }
+        return self::BBOX_DEFAULT;
+    }
+
+    /**
+     * Returns the last Cell bounding box [llx, lly, urx, ury].
+     *
+     * @return TBBox  Array of bounding box values.
+     */
+    public function getLastCellBBox(): array
+    {
+        if ($this->cellbbox === []) {
+            return self::BBOX_DEFAULT;
+        }
+        $idx = \count($this->cellbbox) - 1;
+        $item = $this->cellbbox[$idx] ?? null;
+        if ($item !== null) {
+            return $item;
+        }
+        return self::BBOX_DEFAULT;
+    }
+
+    /**
+     * Remove special chacters from the text string:
+     *     - 'CARRIAGE RETURN' (U+000D)
+     *     - 'NO-BREAK SPACE' (U+00A0)
+     *     - 'SHY' (U+00AD) SOFT HYPHEN
+     *
+     * @param string $txt Text string to be processed.
+     *
+     * @throws \Com\Tecnick\Unicode\Exception
+     */
+    protected function cleanupText(string $txt): string
+    {
+        $txt = \str_replace("\r", ' ', $txt);
+        $txt = \str_replace($this->uniconv->chr(UnicodeConstant::NO_BREAK_SPACE), ' ', $txt);
+        return \str_replace($this->uniconv->chr(UnicodeConstant::SOFT_HYPHEN), '', $txt);
+    }
+
+    /**
+     * Returns the string to be used as input for getOutTextShowing().
+     *
+     * @param string          $txt      Clean text string to be processed.
+     * @param array<int, int> $ordarr   Array of UTF-8 codepoints (integer values).
+     * @param TTextDims       $dim      Array of dimensions
+     * @param float           $width    Desired string width in points (0 = automatic).
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     */
+    protected function getJustifiedString(string $txt, array $ordarr, array $dim, float $width = 0): string
+    {
+        $pwidth = $this->toPoints($width);
+
+        $this->bbox[] = $this->getLastBBox();
+        $bboxid = \array_key_last($this->bbox);
+
+        if (!$this->isunicode || $this->font->isCurrentByteFont()) {
+            if ($this->isunicode) {
+                $latin = $this->uniconv->uniArrToLatinArr($ordarr);
+                /** @var array<int<0, 255>> $latin */
+                $txt = $this->uniconv->latinArrToStr($latin);
+            }
+            $txt = $this->encrypt->escapeString($txt);
+            $txt = $this->getOutTextShowing($txt, 'Tj');
+            if ($pwidth > 0) {
+                $spacesVal = (int) $dim['spaces'];
+                $spaces = $spacesVal !== 0 ? $spacesVal : 1;
+                $totWidth = $dim['totwidth'];
+                $spacewidth = ($pwidth - $totWidth) / $spaces;
+                return $this->getOutTextStateOperatorTw($txt, $spacewidth);
+            }
+            $totWidth = $dim['totwidth'];
+            $this->bbox[$bboxid]['w'] = $this->toUnit($totWidth);
+            return $txt;
+        }
+
+        $unistr = \implode('', $this->uniconv->ordArrToChrArr($ordarr));
+        $txt = $this->uniconv->toUTF16BE($unistr);
+        $txt = $this->encrypt->escapeString($txt);
+
+        if ($pwidth <= 0) {
+            $totWidth = $dim['totwidth'];
+            $this->bbox[$bboxid]['w'] = $this->toUnit($totWidth);
+            return $this->getOutTextShowing($txt, 'Tj');
+        }
+
+        $font = $this->font->getCurrentFont();
+        $fontsize = $font['size'];
+        if ($fontsize === 0.0) {
+            $fontsize = 1;
+        }
+
+        $spacesVal = (int) $dim['spaces'];
+        $spaces = $spacesVal !== 0 ? $spacesVal : 1;
+        $totWidth = $dim['totwidth'];
+        $totSpaceWidth = $dim['totspacewidth'];
+        $spacewidth = ($pwidth - $totWidth + $totSpaceWidth) / $spaces;
+        $spacewidth = (-1000 * $spacewidth) / $fontsize;
+        $txt = \str_replace(\chr(0) . \chr(32), \sprintf(') %F (', $spacewidth), $txt);
+
+        return $this->getOutTextShowing($txt, 'TJ');
+    }
+
+    /**
+     * Get the PDF code for the specified Text Positioning Operator mode.
+     *
+     * @param string $raw  Raw PDf data to be wrapped by this command.
+     * @param float  $posx X position relative to the start of the current line.
+     * @param float  $posy Y position relative to the start of the current line.
+     * @param string $mode Text state parameter to apply (one of: Td, TD, T*).
+     *
+     * @throws \Com\Tecnick\Pdf\Page\Exception
+     */
+    protected function getOutTextPosXY(string $raw, float $posx = 0, float $posy = 0, string $mode = 'Td'): string
+    {
+        $pntx = $this->toPoints($posx);
+        $pnty = $this->toYPoints($posy);
+        return match ($mode) {
+            'Td' => \sprintf('%F %F Td ' . $this->escapePerc($raw), $pntx, $pnty),
+            'TD' => \sprintf('%F %F TD ' . $this->escapePerc($raw), $pntx, $pnty),
+            'T*' => 'T* ' . $raw,
+            default => '',
+        };
+    }
+
+    /**
+     * Get the text rendering mode.
+     *
+     * @param bool $fill   If true fills the text.
+     * @param bool $stroke If true stroke the text.
+     * @param bool $clip   If true activate clipping mode.
+     *
+     * @return int Text rendering mode as in PDF 32000-1:2008 - 9.3.6 Text Rendering Mode.
+     */
+    protected function getTextRenderingMode(bool $fill = true, bool $stroke = false, bool $clip = false): int
+    {
+        $mode = ((int) $clip << 2) + ((int) $stroke << 1) + (int) $fill;
+        return match ($mode) {
+            0 => 3,
+            4 => 7,
+            default => $mode - 1,
+        };
+    }
+
+    /**
+     * Get the PDF code for the Tc (character spacing) Text State Operator.
+     *
+     * @param string    $raw   Raw PDf data to be wrapped by this command.
+     * @param int|float $value Raw value to apply in internal units.
+     */
+    protected function getOutTextStateOperatorTc(string $raw, int|float $value = 0): string
+    {
+        if ((float) $value === 0.0) {
+            return $raw;
+        }
+
+        return \sprintf('%F Tc ' . $this->escapePerc($raw) . ' 0 Tc', $value);
+    }
+
+    /**
+     * Get the PDF code for the Tw (word spacing) Text State Operator.
+     *
+     * @param string    $raw   Raw PDf data to be wrapped by this command.
+     * @param int|float $value Raw value to apply in internal units.
+     */
+    protected function getOutTextStateOperatorTw(string $raw, int|float $value = 0): string
+    {
+        if ((float) $value === 0.0) {
+            return $raw;
+        }
+
+        return \sprintf('%F Tw ' . $this->escapePerc($raw) . ' 0 Tw', $value);
+    }
+
+    /**
+     * Get the PDF code for the Tz (horizontal scaling) Text State Operator.
+     *
+     * @param string    $raw   Raw PDf data to be wrapped by this command.
+     * @param int|float $value Raw value to apply in internal units.
+     */
+    protected function getOutTextStateOperatorTz(string $raw, int|float $value = 0): string
+    {
+        if ((float) $value === 1.0) {
+            return $raw;
+        }
+
+        return \sprintf('%F Tz ' . $this->escapePerc($raw) . ' 100 Tz', $value);
+    }
+
+    /**
+     * Get the PDF code for the TL (text leading) Text State Operator.
+     *
+     * @param string    $raw   Raw PDf data to be wrapped by this command.
+     * @param int|float $value Raw value to apply in internal units.
+     */
+    protected function getOutTextStateOperatorTL(string $raw, int|float $value = 0): string
+    {
+        if ((float) $value === 0.0) {
+            return $raw;
+        }
+
+        return \sprintf('%F TL ' . $this->escapePerc($raw) . ' 0 TL', $value);
+    }
+
+    /**
+     * Get the PDF code for the Tr (text rendering) Text State Operator.
+     *
+     * @param string    $raw   Raw PDf data to be wrapped by this command.
+     * @param int|float $value Raw value to apply in internal units.
+     */
+    protected function getOutTextStateOperatorTr(string $raw, int|float $value = 0): string
+    {
+        if ($value < 0 || $value > 7) {
+            return $raw;
+        }
+
+        return \sprintf('%d Tr ' . $this->escapePerc($raw), $value);
+    }
+
+    /**
+     * Get the PDF code for the Ts (text rise) Text State Operator.
+     *
+     * @param string    $raw   Raw PDf data to be wrapped by this command.
+     * @param int|float $value Raw value to apply in internal units.
+     */
+    protected function getOutTextStateOperatorTs(string $raw, int|float $value = 0): string
+    {
+        if ((float) $value === 0.0) {
+            return $raw;
+        }
+
+        return \sprintf('%F Ts ' . $this->escapePerc($raw) . ' 0 Ts', $value);
+    }
+
+    /**
+     * Get the PDF code for the w (stroke width) Text State Operator.
+     *
+     * @param string    $raw   Raw PDf data to be wrapped by this command.
+     * @param int|float $value Raw value to apply in internal units.
+     */
+    protected function getOutTextStateOperatorw(string $raw, int|float $value = 0): string
+    {
+        return \sprintf('%F w ' . $this->escapePerc($raw), $value > 0 ? $value : 0);
+    }
+
+    /**
+     * Get the PDF code for the Text Positioning Operator Matrix.
+     *
+     * @param string $raw    Raw PDf data to be wrapped by this command.
+     * @param array{float, float, float, float, float, float} $matrix Text Positioning Operator Matrix.
+     */
+    protected function getOutTextPosMatrix(string $raw, array $matrix = [1, 0, 0, 1, 0, 0]): string
+    {
+        if (\count($matrix) !== 6) {
+            return '';
+        }
+
+        return \sprintf(
+            '%F %F %F %F %F %F Tm ' . $this->escapePerc($raw),
+            $matrix[0],
+            $matrix[1],
+            $matrix[2],
+            $matrix[3],
+            $matrix[4],
+            $matrix[5],
+        );
+    }
+
+    /**
+     * Get the PDF code for showing a string.
+     *
+     * @param string $str  String to show.
+     * @param string $mode Text-showing operator to apply (one of: Tj, TJ, ').
+     */
+    protected function getOutTextShowing(string $str, string $mode = 'Tj'): string
+    {
+        return match ($mode) {
+            'Tj' => '(' . $str . ') Tj',
+            'TJ' => '[(' . $str . ')] TJ',
+            "'" => '(' . $str . ") '",
+            default => '',
+        };
+    }
+
+    /**
+     * Returns a text oject by wrapping the $raw input.
+     *
+     * @param string $raw Raw PDf data to be wrapped by this command.
+     */
+    protected function getOutTextObject(string $raw = ''): string
+    {
+        return 'BT ' . $raw . ' ET' . "\n";
+    }
+
+    /**
+     * Replace characters for languages like Thai.
+     *
+     * @param array<int, int> $ordarr Array of UTF-8 codepoints (integer values).
+     *
+     * @return array<int, int> Array of UTF-8 codepoints (integer values).
+     */
+    /**
+     * Replace Unicode characters using substitution table.
+     *
+     * @param array<int, int> $ordarr Unicode ordinal array.
+     *
+     * @return array<int, int>
+     */
+    protected function replaceUnicodeChars(array $ordarr): array
+    {
+        $sub = new Substitution();
+        return $sub->replaceChars($ordarr);
+    }
+
+    // ===| HYPENATION |====================================================
+
+    /**
+     * Returns an array of hyphenation patterns.
+     *
+     * @param string $file TEX file containing hypenation patterns.
+     *                     TEX patterns can be downloaded from
+     *                     https://www.ctan.org/tex-archive/language/hyph-utf8/tex/generic/hyph-utf8/patterns/tex
+     *                     See https://www.ctan.org/tex-archive/language/hyph-utf8/ for more information.
+     *
+     * @return array<string, string> Array of hyphenation patterns.
+     *
+     * @throws PdfException
+     * @throws \Com\Tecnick\File\Exception
+     */
+    public function loadTexHyphenPatterns(string $file): array
+    {
+        $pattern = [];
+        $data = $this->file->fileGetContents($file);
+        // remove comments
+        $data = \preg_replace('/\%[^\n]*+/', '', $data);
+        if ($data === null) {
+            throw new PdfException('Unable to load hyphenation patterns from file: ' . $file);
+        }
+
+        // extract the patterns part
+        $matches = [];
+        if (\preg_match('/\\\\patterns\{([^\}]*+)\}/i', $data, $matches) !== 1) {
+            throw new PdfException('Invalid hyphenation pattern section from file: ' . $file);
+        }
+
+        if (!isset($matches[0])) {
+            throw new PdfException('Invalid hyphenation pattern section from file: ' . $file);
+        }
+
+        $data = \trim(\substr($matches[0], 10, -1));
+        // extract each pattern
+        $list = \preg_split('/[\s]+/', $data);
+        if ($list === false) {
+            throw new PdfException('Invalid hyphenation patterns from file: ' . $file);
+        }
+
+        // map patterns
+        $pattern = [];
+        foreach ($list as $val) {
+            if ($val === '') {
+                continue;
+            }
+
+            $val = \str_replace("'", '\\\'', \trim($val));
+            $key = \preg_replace('/\d+/', '', $val);
+            if ($key !== null) {
+                $pattern[$key] = $val;
+            }
+        }
+
+        return $pattern;
+    }
+
+    /**
+     * Sets the hyphen patterns for text.
+     *
+     * @param array<string, string> $patterns Array of hyphenation patterns.
+     *
+     * @return void
+     *
+     * @see loadTexHyphenPatterns()
+     */
+    public function setTexHyphenPatterns(array $patterns): void
+    {
+        $this->hyphen_patterns = $patterns;
+    }
+
+    /**
+     * Removes soft hyphens from an array of Unicode code points.
+     *
+     * @param array<int, int> $ordarr The array of Unicode code points.
+     *
+     * @return array<int, int> The filtered array with soft hyphens removed.
+     */
+    protected function removeOrdArrSoftHyphens(array $ordarr): array
+    {
+        $keeplast = false;
+        $lastidx = \array_key_last($ordarr);
+        if ($lastidx !== null && isset($ordarr[$lastidx])) {
+            $keeplast = $ordarr[$lastidx] === UnicodeConstant::SOFT_HYPHEN;
+        }
+        $retarr = \array_values(\array_filter(
+            $ordarr,
+            static fn($ord) => $ord !== UnicodeConstant::SOFT_HYPHEN && $ord !== UnicodeConstant::ZERO_WIDTH_SPACE,
+        ));
+        if ($keeplast) {
+            $retarr[] = UnicodeConstant::SOFT_HYPHEN;
+        }
+        return $retarr;
+    }
+
+    /**
+     * Hyphenate a text array of UTF-8 codepoints by adding SOFT-HYPHEN (U+00AD) characters.
+     *
+     * @param array<string, string> $phyphens An array of hyphenation patterns.
+     * @param array<int, int> $ordarr  Array of UTF-8 codepoints (integer values).
+     *
+     * @return array<int, int> The modified array with SOFT-HYPHEN (U+00AD) characters.
+     *
+     * @throws \Com\Tecnick\Unicode\Exception
+     */
+    protected function hyphenateTextOrdArr(array $phyphens, array $ordarr): array
+    {
+        $txtarr = [];
+        $word = [];
+
+        foreach ($ordarr as $ord) {
+            $unitype = UnicodeType::UNI[$ord] ?? '';
+            switch ($unitype) {
+                case 'L':
+                    $word[] = $ord;
+                    break;
+                default:
+                    if (\count($word) > 0) {
+                        $txtarr = \array_merge($txtarr, $this->hyphenateWordOrdArr($phyphens, $word));
+                        $word = [];
+                    }
+                    $txtarr[] = $ord;
+                    break;
+            }
+        }
+
+        if ($word !== []) {
+            $txtarr = \array_merge($txtarr, $this->hyphenateWordOrdArr($phyphens, $word));
+        }
+
+        return $txtarr;
+    }
+
+    /**
+     * Enable or disable automatic line breaking points after some non-letter character types.
+     *
+     * @param bool $enabled
+     */
+    public function enableZeroWidthBreakPoints(bool $enabled): void
+    {
+        $this->autozerowidthbreaks = $enabled;
+    }
+
+    /**
+     * Add artificial line breaking points to an array of UTF-8 codepoints.
+     * This method adds ZERO-WIDTH-SPACE (U+200B) characters after certain Unicode types.
+     *
+     * @param array<int, int> $ordarr  Array of UTF-8 codepoints (integer values).
+     *
+     * @return array<int, int> The modified array with SOFT-HYPHEN (U+00AD) characters.
+     */
+    protected function addOrdArrBreakPoints(array $ordarr): array
+    {
+        $txtarr = [];
+        foreach ($ordarr as $ord) {
+            switch (UnicodeType::UNI[$ord] ?? '') {
+                case 'ES':
+                case 'ET':
+                case 'CS':
+                case 'BN':
+                case 'ON':
+                    $txtarr[] = $ord;
+                    $txtarr[] = UnicodeConstant::ZERO_WIDTH_SPACE;
+                    break;
+                default:
+                    $txtarr[] = $ord;
+                    break;
+            }
+        }
+
+        return $txtarr;
+    }
+
+    /**
+     * Hyphenate a word array of UTF-8 codepoints by adding SOFT-HYPHEN (U+00AD) characters.
+     *
+     * @param array<string, string> $phyphens An array of hyphenation patterns.
+     * @param array<int, int> $ordarr  Array of UTF-8 codepoints (integer values).
+     * @param int $leftmin  Minimum number of characters before the hyphen.
+     * @param int $rightmin Minimum number of characters after the hyphen.
+     * @param int $charmin  Minimum number of characters to consider for hyphenation.
+     * @param int $charmax  Maximum number of characters to consider for hyphenation.
+     *
+     * @return array<int, int> The modified array with SOFT-HYPHEN (U+00AD) characters.
+     *
+     * @throws \Com\Tecnick\Unicode\Exception
+     */
+    protected function hyphenateWordOrdArr(
+        array $phyphens,
+        array $ordarr,
+        int $leftmin = 1,
+        int $rightmin = 2,
+        int $charmin = 1,
+        int $charmax = 8,
+    ): array {
+        $numchars = \count($ordarr);
+        if ($phyphens === [] || $numchars < $charmin) {
+            return $ordarr;
+        }
+
+        $hyphenpos = []; // hyphens positions
+
+        $pad = [46]; // 46 = Period, dot or full stop
+        $tmpword = \array_merge($pad, $ordarr, $pad);
+        $tmpnumchars = $numchars + 2;
+        $maxpos = $tmpnumchars - 1;
+
+        for ($pos = 0; $pos < $maxpos; ++$pos) {
+            $imax = \min($tmpnumchars - $pos, $charmax);
+            for ($i = 1; $i <= $imax; ++$i) {
+                $subword = \mb_strtolower($this->uniconv->getSubUniArrStr(
+                    $this->uniconv->ordArrToChrArr($tmpword),
+                    $pos,
+                    $pos + $i,
+                ));
+                if (isset($phyphens[$subword])) {
+                    $pattern = $this->uniconv->strToOrdArr($phyphens[$subword]);
+                    $pattern_length = \count($pattern);
+                    $digits = 1;
+                    for ($j = 0; $j < $pattern_length; ++$j) {
+                        // check if $pattern[$j] is a number = hyphenation level
+                        // (only numbers from 1 to 5 are valid)
+                        $ord = \is_numeric($pattern[$j] ?? null) ? (int) $pattern[$j] : 0;
+                        if (!($ord >= 48 and $ord <= 57)) {
+                            continue;
+                        }
+
+                        $zero = $j === 0 ? $pos - 1 : $pos + $j - $digits;
+                        // get hyphenation level
+                        $level = $ord - 48;
+                        // if two levels from two different patterns match at the same point,
+                        // the higher one is selected.
+                        if (!isset($hyphenpos[$zero]) or $hyphenpos[$zero] < $level) {
+                            $hyphenpos[$zero] = $level;
+                        }
+                        ++$digits;
+                    }
+                }
+            }
+        }
+
+        $inserted = 0;
+        $maxpos = $numchars - $rightmin;
+        for ($i = $leftmin; $i <= $maxpos; ++$i) {
+            // only odd levels indicate allowed hyphenation points
+            if (!(isset($hyphenpos[$i]) && ($hyphenpos[$i] % 2) !== 0)) {
+                continue;
+            }
+
+            \array_splice($ordarr, $i + $inserted, 0, UnicodeConstant::SOFT_HYPHEN);
+            ++$inserted;
+        }
+
+        return $ordarr;
+    }
+
+    // ===| PAGE |==========================================================
+
+    /**
+     * Add a new page (wrapper function for $this->page->add()).
+     *
+     * @param PageInputData $data Page data.
+     * @return PageData Page data with additional Page ID property 'pid'.
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     * @throws \Com\Tecnick\Unicode\Exception
+     * @throws \Com\Tecnick\Pdf\Page\Exception
+     */
+    public function addPage(array $data = []): array
+    {
+        $page = $this->page->add($data);
+
+        $this->setPageContext($page['pid']);
+
+        $this->graph->setPageWidth($page['width']);
+        $this->graph->setPageHeight($page['height']);
+
+        return $page;
+    }
+
+    /**
+     * Sets the page context by adding the previous page font and graphic settings.
+     *
+     * @param int  $pid Page index. Omit or set it to -1 for the current page ID.
+     *
+     * @return void
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     * @throws \Com\Tecnick\Unicode\Exception
+     * @throws \Com\Tecnick\Pdf\Page\Exception
+     */
+    protected function setPageContext(int $pid = -1): void
+    {
+        if ($this->font->hasCurrentFont()) {
+            $this->page->addContent($this->font->getOutCurrentFont(), $pid);
+        }
+        if ($this->defPageContentEnabled) {
+            $this->page->addContent($this->defaultPageContent($pid), $pid);
+        }
+    }
+
+    /**
+     * Sets the page common content like Header and Footer.
+     * Override this method to add custom content to all pages.
+     *
+     * @param int $pid Page index. Omit or set it to -1 for the current page ID.
+     *
+     * @return string PDF output code.
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     * @throws \Com\Tecnick\Unicode\Exception
+     * @throws \Com\Tecnick\Pdf\Page\Exception
+     */
+    public function defaultPageContent(int $pid = -1): string
+    {
+        if ($pid < 0) {
+            $pid = (int) $this->page->getPageId();
+        }
+
+        if ($this->defaultfont === null) {
+            $this->defaultfont = $this->font->insert($this->pon, 'helvetica', '', 10);
+            $this->font->popLastFont();
+        }
+
+        $deffont = $this->font->insert(
+            $this->pon,
+            $this->defaultfont['key'],
+            $this->defaultfont['style'],
+            $this->defaultfont['size'],
+            $this->defaultfont['spacing'],
+            $this->defaultfont['stretching'],
+        );
+        /** @var array{out: string, dw: float, height: float} $deffont */
+
+        $page = $this->page->getPage($pid);
+        /** @var array{height: float, width: float} $page */
+
+        // print page number in the footer
+        $out = $this->graph->getStartTransform();
+        $out .= $deffont['out'];
+        $out .= $this->color->getPdfFillColor('black');
+        $prevcell = $this->defcell;
+        $this->defcell = $this::ZEROCELL;
+
+        $out .= $this->getTextCell(
+            (string) ($pid + 1),
+            $this->toUnit($deffont['dw']),
+            $page['height'] - (2 * $this->toUnit($deffont['height'])),
+            $page['width'] - (4 * $this->toUnit($deffont['dw'])),
+            0,
+            0,
+            0,
+            'T',
+            $this->rtl ? 'L' : 'R',
+        );
+        $out .= $this->graph->getStopTransform();
+        $this->defcell = $prevcell;
+        $this->font->popLastFont();
+
+        // Repeated page-number footer is presentation-only content in tagged output.
+        return $this->tagPdfUaArtifactContent($out, 'Pagination', 'Footer');
+    }
+
+    /**
+     * Escape percent signs in a string for use with sprintf.
+     *
+     * @param string $str The input string to escape.
+     *
+     * @return string The escaped string with percent signs replaced by double percent signs.
+     */
+    protected function escapePerc(string $str): string
+    {
+        return \str_replace('%', '%%', $str);
+    }
+
+    /**
+     * Returns the string width in user units.
+     *
+     * @param string $str Input string to measure.
+     *
+     * @return float String width in user units.
+     *
+     * @throws \Com\Tecnick\Pdf\Font\Exception
+     * @throws \Com\Tecnick\Unicode\Exception
+     */
+    protected function getStringWidth(string $str): float
+    {
+        $ordarr = [];
+        $dim = self::DIM_DEFAULT;
+        $this->prepareText($str, $ordarr, $dim);
+        return $this->toUnit($dim['totwidth']);
+    }
+}
