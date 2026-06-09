@@ -1,8 +1,25 @@
 <?php
+// Charger les variables d'environnement depuis .env
+if (file_exists(__DIR__ . '/.env')) {
+    $env = parse_ini_file(__DIR__ . '/.env');
+    $host = $env['DB_HOST'] ?? 'localhost';
+    $dbname = $env['DB_NAME'] ?? 'esuggest';
+    $username = $env['DB_USER'] ?? 'root';
+    $password = $env['DB_PASS'] ?? '';
+    $siteRoot = $env['SITE_ROOT'] ?? '/';
+} else {
+    // Si pas de .env (ex: Scalingo), utiliser DATABASE_URL
+    $dbUrl = parse_url(getenv('DATABASE_URL') ?? '');
+    $host = $dbUrl['host'] ?? 'localhost';
+    $dbname = ltrim($dbUrl['path'] ?? '', '/') ?: 'esuggest';
+    $username = $dbUrl['user'] ?? 'root';
+    $password = $dbUrl['pass'] ?? '';
+    $siteRoot = '/';
+}
 
 // CONSTANTES POUR LES URLS (SCALINGO)
 // Chemin de base pour les URLs
-define('SITE_ROOT', '/');
+define('SITE_ROOT', $siteRoot);
 
 // Chemin absolu assets (css, js, images)
 define('ASSETS_ROOT', SITE_ROOT . 'assets/');
