@@ -1,0 +1,60 @@
+# =============================================
+# ENVIRONNEMENT
+# =============================================
+# Fichier de configuration locale (contient des identifiants)
+.env
+
+# =============================================
+# SYSTÈME
+# =============================================
+# Dossiers système (Mac/Windows)
+.DS_Store
+Thumbs.db
+
+# =============================================
+# LOGICIELS/ÉDITEURS
+# =============================================
+# VS Code
+.vscode/
+
+# IDE (NetBeans, PHPStorm, etc.)
+.idea/
+.netbeans/
+.phpstorm/
+
+# =============================================
+# PHP
+# =============================================
+# Fichiers de cache, logs, sessions
+*.log
+*.cache
+*.session
+/sessions/
+
+# =============================================
+# BASE DE DONNÉES
+# =============================================
+# Fichiers SQL de sauvegarde (si tu en as localement)
+*.sql
+esuggest.sql
+
+# =============================================
+# SCALINGO
+# =============================================
+# Fichiers générés par Scalingo (à ignorer localement)
+.scalingo/
+.scalingo.env
+
+# =============================================
+# AUTRES
+# =============================================
+# Dossier node_modules (si tu utilises npm)
+node_modules/
+
+# Fichiers de build (si tu utilises un bundler)
+dist/
+build/
+
+# Fichiers temporaires
+*.tmp
+*.swp
