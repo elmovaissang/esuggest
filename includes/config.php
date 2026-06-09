@@ -1,29 +1,33 @@
 <?php
 
-// Racine du site pour l'URL
-define('SITE_ROOT', '/Projects/esuggest/');
+// CONSTANTES POUR LES URLS (SCALINGO)
+// Chemin de base pour les URLs
+define('SITE_ROOT', '/');
 
 // Chemin absolu assets (css, js, images)
 define('ASSETS_ROOT', SITE_ROOT . 'assets/');
 
-// Informations de connexion à la base de données
-$host = 'localhost';
-$dbname = 'esuggest';
-$username = 'root';
-$password = '';
+// CONNEXION À LA BASE DE DONNÉES (SCALINGO)
+// Format : mysql://user:password@host:port/dbname
+$dbUrl = parse_url(getenv('DATABASE_URL'));
 
-// Connexion à la base de données avec PDO
+// Extraire les informations de connexion
+$host = $dbUrl['host'];
+$dbname = ltrim($dbUrl['path'], '/'); // Supprime le "/" au début
+$username = $dbUrl['user'];
+$password = $dbUrl['pass'];
+
+// Conjnexion à la base de données avec PDO
 try {
-    // création de la connexion à MySQL
     $pdo = new PDO(
         "mysql:host=$host;dbname=$dbname;charset=utf8mb4",
         $username,
         $password
     );
 
-    // configurer PDO -> affichage erreurs SQL (utile pour débogage)
+    // Configurer PDO pour afficher les erreurs SQL
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 } catch (PDOException $e) {
-    // en cas d'erreur, message d'erreur + stop le script (die)
-    die("Erreur de connexion à la base de données : ".$e->getMessage());
+    // En cas d'erreuur, afficher un message et arrêter le script
+    die("Erreur de connexion à la base de données :" . $e->getMessage());
 }
