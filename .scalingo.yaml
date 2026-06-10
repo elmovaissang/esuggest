@@ -1,0 +1,7 @@
+# .scalingo.yml
+php:
+  version: 8.2  # ou 8.1 selon ta version locale
+
+# Commandes à exécuter après le déploiement
+postdeploy:
+  - php migrations/apply.php  # (si migrations)
