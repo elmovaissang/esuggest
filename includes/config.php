@@ -26,13 +26,13 @@ define('ASSETS_ROOT', SITE_ROOT . 'assets/');
 
 // CONNEXION À LA BASE DE DONNÉES (SCALINGO)
 // Format : mysql://user:password@host:port/dbname
-$dbUrl = parse_url(getenv('DATABASE_URL'));
+$dbUrl = parse_url(getenv('DATABASE_URL') ?? '');
 
 // Extraire les informations de connexion
-$host = $dbUrl['host'];
-$dbname = ltrim($dbUrl['path'], '/'); // Supprime le "/" au début
-$username = $dbUrl['user'];
-$password = $dbUrl['pass'];
+$host = $dbUrl['host'] ?? 'localhost';
+$dbname = ltrim($dbUrl['path'] ?? '', '/') ?: 'esuggest'; // Supprime le "/" au début
+$username = $dbUrl['user'] ?? 'root';
+$password = $dbUrl['pass'] ?? '';
 
 // Conjnexion à la base de données avec PDO
 try {
@@ -48,3 +48,8 @@ try {
     // En cas d'erreuur, afficher un message et arrêter le script
     die("Erreur de connexion à la base de données :" . $e->getMessage());
 }
+
+// Désactiver l'affichage des erreurs en prod
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+ini_set('error_log', '/tmp/php_errors.log'); // Scalingo gère les logs
