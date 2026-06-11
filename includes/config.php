@@ -27,10 +27,10 @@ try {
     );
 } catch (PDOException $e) {
     // Message d'erreur personnalisé (ne pas afficher les détails en production)
-    die("Une erreur est survenue. Veuillez réessayer plus tard.");
+    die("Erreur de connexion à la base de données : " . $e->getMessage());
 }
 
 // --- 5. DÉSACTIVER L'AFFICHAGE DES ERREURS EN PRODUCTION ---
-ini_set('display_errors', 0);                   // Désactive l'affichage des erreurs
+ini_set('display_errors', 1);                   // Désactive l'affichage des erreurs
 ini_set('log_errors', 1);                       // Active la journalisation des erreurs
 ini_set('error_log', '/tmp/php_errors.log');    // Chemin pour les logs (InfinityFree gère les logs automatiquement)
