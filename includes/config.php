@@ -1,55 +1,36 @@
 <?php
-// Charger les variables d'environnement depuis .env
-if (file_exists(__DIR__ . '/.env')) {
-    $env = parse_ini_file(__DIR__ . '/.env');
-    $host = $env['DB_HOST'] ?? 'localhost';
-    $dbname = $env['DB_NAME'] ?? 'esuggest';
-    $username = $env['DB_USER'] ?? 'root';
-    $password = $env['DB_PASS'] ?? '';
-    $siteRoot = $env['SITE_ROOT'] ?? '/';
-} else {
-    // Si pas de .env (ex: Scalingo), utiliser DATABASE_URL
-    $dbUrl = parse_url(getenv('DATABASE_URL') ?? '');
-    $host = $dbUrl['host'] ?? 'localhost';
-    $dbname = ltrim($dbUrl['path'] ?? '', '/') ?: 'esuggest';
-    $username = $dbUrl['user'] ?? 'root';
-    $password = $dbUrl['pass'] ?? '';
-    $siteRoot = '/';
-}
 
-// CONSTANTES POUR LES URLS (SCALINGO)
-// Chemin de base pour les URLs
-define('SITE_ROOT', $siteRoot);
+// --- 1. IDENTIFIANTS DE LA BASE DE DONNÉES ---
+$host = 'sql306.infinityfree.com';
+$dbname = 'if0_42157903_esuggest';      // Nom de la DB
+$username = 'if0_42157903';             // Nom user MySQL
+$password = 'ton_mot_de_passe_mysql';   // Mot de passe MySQL généré par InfinityFree
 
-// Chemin absolu assets (css, js, images)
-define('ASSETS_ROOT', SITE_ROOT . 'assets/');
+// --- 2. CHEMIN DE BASE POUR LE SITE ---
+$siteRoot = '/';        // racine
 
-// CONNEXION À LA BASE DE DONNÉES (SCALINGO)
-// Format : mysql://user:password@host:port/dbname
-$dbUrl = parse_url(getenv('DATABASE_URL') ?? '');
+// --- 3. CHEMIN POUR LES FICHIERS STATIQUES (CSS, JS, IMAGES) ---
+// Backblaze B2
+define('ASSETS_ROOT', 'https://f001.backblazeb2.com/file/esuggest-assets/');
 
-// Extraire les informations de connexion
-$host = $dbUrl['host'] ?? 'localhost';
-$dbname = ltrim($dbUrl['path'] ?? '', '/') ?: 'esuggest'; // Supprime le "/" au début
-$username = $dbUrl['user'] ?? 'root';
-$password = $dbUrl['pass'] ?? '';
-
-// Conjnexion à la base de données avec PDO
+// --- 4. CONNEXION À LA BASE DE DONNÉES ---
 try {
+    // Connexion PDO avec les identifiants InfinityFree
     $pdo = new PDO(
         "mysql:host=$host;dbname=$dbname;charset=utf8mb4",
         $username,
-        $password
+        $password,
+        [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, // Affiche les erreurs SQL
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, // Récupère les résultats sous forme de tableau associatif
+        ]
     );
-
-    // Configurer PDO pour afficher les erreurs SQL
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 } catch (PDOException $e) {
-    // En cas d'erreuur, afficher un message et arrêter le script
-    die("Erreur de connexion à la base de données :" . $e->getMessage());
+    // Message d'erreur personnalisé (ne pas afficher les détails en production)
+    die("Une erreur est survenue. Veuillez réessayer plus tard.");
 }
 
-// Désactiver l'affichage des erreurs en prod
-ini_set('display_errors', 0);
-ini_set('log_errors', 1);
-ini_set('error_log', '/tmp/php_errors.log'); // Scalingo gère les logs
+// --- 5. DÉSACTIVER L'AFFICHAGE DES ERREURS EN PRODUCTION ---
+ini_set('display_errors', 0);                   // Désactive l'affichage des erreurs
+ini_set('log_errors', 1);                       // Active la journalisation des erreurs
+ini_set('error_log', '/tmp/php_errors.log');    // Chemin pour les logs (InfinityFree gère les logs automatiquement)
