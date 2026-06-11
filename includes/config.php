@@ -4,7 +4,7 @@
 $host = 'sql306.infinityfree.com';
 $dbname = 'if0_42157903_esuggest';      // Nom de la DB
 $username = 'if0_42157903';             // Nom user MySQL
-$password = 'ton_mot_de_passe_mysql';   // Mot de passe MySQL généré par InfinityFree
+$password = 'pEBuZVpvFEYkI';   // Mot de passe MySQL généré par InfinityFree
 
 // --- 2. CHEMIN DE BASE POUR LE SITE ---
 $siteRoot = '/';        // racine
