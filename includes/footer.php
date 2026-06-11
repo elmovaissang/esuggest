@@ -1,4 +1,5 @@
 <?php
+// pied de page
 ?>
     <!-- Fermeture du conteneur (ouvert dans header.php) -->
         </div>

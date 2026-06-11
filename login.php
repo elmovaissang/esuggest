@@ -23,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // essayer de connecter l'utilisateur
     if (login($pdo, $email, $password)) {
         // rediriger si connexion ok
-        header('Location: index.php');
+        header('Location: ' . SITE_ROOT . 'index.php');
         exit;
     } else {
         // si connexion echec -> message d'erreur
@@ -35,31 +35,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 include_once 'includes/header.php';
 ?>
 
-    <div class="login-container">
-        <h1>Connexion à eSuggest</h1>
+<div class="login-container">
+    <h1>Connexion à eSuggest</h1>
 
-        <!-- Message d'erreur si echec de connexion -->
-        <?php if (isset($error)): ?>
-            <div class="error"><?= htmlspecialchars($error) ?></div>
-        <?php endif; ?>
+    <!-- Message d'erreur si echec de connexion -->
+    <?php if (isset($error)): ?>
+        <div class="error"><?= htmlspecialchars($error) ?></div>
+    <?php endif; ?>
 
-        <!-- Formulaire de connexion -->
-        <form action="" method="post" class="login-form">
-            <div class="form-group">
-                <label for="email">Email :</label>
-                <input type="email" name="email" id="email" placeholder="email@exemple.fr" required>
-            </div>
-
-            <div class="form-group">
-                <label for="pwd">Mot de passe :</label>
-                <input type="password" name="pwd" id="pwd" placeholder="Votre mot de passe" required>
-            </div>
-
-            <button class="btn" type="submit">
-                Se connecter
-            </button>
-        </form>
-    </div>
+    <!-- Formulaire de connexion -->
+    <form action="" method="post" class="login-form">
+        <div class="form-group">
+            <label for="email">Email :</label>
+            <input type="email" name="email" id="email" placeholder="email@exemple.fr" required>
+        </div>
+        <div class="form-group">
+            <label for="pwd">Mot de passe :</label>
+            <input type="password" name="pwd" id="pwd" placeholder="Votre mot de passe" required>
+        </div>
+        <button class="btn" type="submit">Se connecter</button>
+    </form>
+</div>
 
 <?php
 // Footer

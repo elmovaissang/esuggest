@@ -14,7 +14,7 @@ requireLogin();
 include_once 'includes/header.php';
 ?>
 
-    <!-- Afficher message de bienvenue personnalisé -->
+<!-- Afficher message de bienvenue personnalisé -->
 <div class="container">
     <h1>Bienvenue sur eSuggest, <?= htmlspecialchars($_SESSION['user_fname'] . ' ' . $_SESSION['user_name']) ?> !</h1>
     <p>Vous êtes connecté en tant que <strong><?= htmlspecialchars($_SESSION['role']) ?>.</strong></p>
@@ -23,11 +23,11 @@ include_once 'includes/header.php';
     <section class="actions-section">
         <h2>Que souhaitez-vous faire ?</h2>
         <div class="actions">
-            <a href="factures/list.php" class="btn">Voir les factures</a>
-            <a href="factures/create.php" class="btn">Créer une facture</a>
-            <a href="classeurs/list.php" class="btn">Gérer les classeurs</a>
+            <a href="<?= SITE_ROOT ?>factures/list.php" class="btn">Voir les factures</a>
+            <a href="<?= SITE_ROOT ?>factures/create.php" class="btn">Créer une facture</a>
+            <a href="<?= SITE_ROOT ?>classeurs/list.php" class="btn">Gérer les classeurs</a>
             <?php if (isAdmin()): ?>
-                <a href="admin/users.php" class="btn">Gérer les utilisateurs</a>
+                <a href="<?= SITE_ROOT ?>admin/users.php" class="btn">Gérer les utilisateurs</a>
             <?php endif; ?>
         </div>
     </section>

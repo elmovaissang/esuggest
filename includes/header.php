@@ -5,14 +5,16 @@ require_once 'config.php';
 require_once 'functions.php';
 require_once 'auth.php';
 
-// Récupérer les classeurs si connecté (pour le menu déroulant)
+// Titre de la page par défaut
+$page_title = $page_title ?? 'eSuggest';
+
+// Récupérer les classeurs si connecté
 $folders = [];
 if (isLoggedIn()) {
     $stmt = $pdo->prepare("SELECT id, name FROM folder WHERE user_id = ? ORDER BY name ASC");
     $stmt->execute([$_SESSION['user_id']]);
     $folders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
-
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -21,7 +23,7 @@ if (isLoggedIn()) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>eSuggest - <?= isset($page_title) ? htmlspecialchars($page_title) : 'Accueil' ?></title>
 
-    <!-- Feuille de style CSS -->
+    <!-- Feuille de style CSS (Backblaze B2) -->
     <link rel="stylesheet" href="<?= ASSETS_ROOT ?>css/style.css">
 
     <!-- Google Fonts (Montserrat + Inter) -->

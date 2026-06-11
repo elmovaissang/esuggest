@@ -1,9 +1,9 @@
 <?php
 
 // Inclure les fichiers nécessaires
-require_once '../includes/config.php';
-require_once '../includes/auth.php';
-require_once '../includes/functions.php';
+require_once 'includes/config.php';
+require_once 'includes/auth.php';
+require_once 'includes/functions.php';
 
 // Titre de la page
 $page_title = "Modifier la facture";
@@ -91,13 +91,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$error) {
 }
 
 // header après vérification de connexion
-include_once '../includes/header.php';
+include_once 'includes/header.php';
 ?>
 
     <?php if ($error): ?>
     <!-- Message si erreur modification -->
         <div class="error"><?= htmlspecialchars($error) ?></div>
-        <a href="list.php" class="btn">Retour à la liste des factures</a>
+        <a href="<?= SITE_ROOT ?>faclist.php" class="btn">Retour à la liste des factures</a>
     <?php else: ?>
     <!-- Formulaire de modification -->
         <h1>Modifier la facture n°<?= htmlspecialchars($invoice['number']) ?></h1>

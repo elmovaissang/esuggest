@@ -1,9 +1,9 @@
 <?php
 
 // Inclure les fichiers nécessaires
-require_once '../includes/config.php';
-require_once '../includes/auth.php';
-require_once '../includes/functions.php';
+require_once 'includes/config.php';
+require_once 'includes/auth.php';
+require_once 'includes/functions.php';
 
 // Titre de la page
 $page_title = "Créer une facture";
@@ -11,11 +11,11 @@ $page_title = "Créer une facture";
 // Vérifier la connexion du user
 requireLogin();
 
-// Récupérer la liste des clients pour le formulaire
+// Récupérer les clients
 $stmt = $pdo->query("SELECT * FROM client");
 $clients = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Récupérer la liste des classeurs pour le form
+// Récupérer les classeurs
 $stmt = $pdo->prepare("SELECT * FROM folder WHERE user_id = ? ORDER BY name ASC");
 $stmt->execute([$_SESSION['user_id']]);
 $folders = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -32,12 +32,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $amount_ht = (float) str_replace(',', '.', $_POST['amount_ht']);
     $tva = (float) str_replace(',', '.', $_POST['tva']);
     $amount_ttc = $amount_ht + $tva;
-    $status = 'draft'; // brouillon par défaut
+    $status = 'draft';
     $format = $_POST['format'];
     $client_id = (int) $_POST['client_id'];
     $folder_id = isset($_POST['folder_id']) && $_POST['folder_id'] !== '' ? (int) $_POST['folder_id'] : null;
 
-    // Générer num facture unique
+    // Générer nb facture unique
     $number = generateNumber($pdo, 'FACT');
 
     // Insérer une facture dans la base de données
@@ -51,9 +51,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $status, $format, $_SESSION['user_id'], 'user', $client_id, $folder_id
     ]);
 
-    // Ajout de log à la création de la facture
-    $folder_name = 'aucun';
     // trouver le nom du folder pour le log
+    $folder_name = 'aucun';
     if ($folder_id) {
         foreach ($folders as $folder) {
             if ($folder['id'] == $folder_id) {
@@ -62,6 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     }
+    // Ajout de log à la création de la facture
     addLog($pdo, $_SESSION['user_id'], 'Création facture', "Facture n°$number créée (Classeur: $folder_name)");
 
     // Redirection vers la liste
@@ -70,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // header après vérification de connexion
-include_once '../includes/header.php';
+include_once 'includes/header.php';
 ?>
 
     <h1>Créer une facture</h1>
@@ -132,4 +132,5 @@ include_once '../includes/header.php';
 
 <?php
 // Footer
-include_once '../includes/footer.php';
+include_once 'includes/footer.php';
+

@@ -1,36 +1,43 @@
 <?php
 
-// --- 1. IDENTIFIANTS DE LA BASE DE DONNÉES ---
-$host = 'sql306.infinityfree.com';
+// Stocker les sessions
+ini_set('session.save_path', __DIR__ . '/../../sessions/');
+session_start();
+
+// ID database - InfinityFree
+$host = 'sql306.infinityfree.com';      // hôte MySQL
 $dbname = 'if0_42157903_esuggest';      // Nom de la DB
 $username = 'if0_42157903';             // Nom user MySQL
-$password = 'pEBuZVpvFEYkI';   // Mot de passe MySQL généré par InfinityFree
+$password = 'pEBuZVpvFEYkI';            // Mot de passe MySQL généré par InfinityFree
 
-// --- 2. CHEMIN DE BASE POUR LE SITE ---
-$siteRoot = '/';        // racine
+// Chemin de base, racine domaine - InfinityFree
+define('SITE_ROOT', '/');
 
-// --- 3. CHEMIN POUR LES FICHIERS STATIQUES (CSS, JS, IMAGES) ---
-// Backblaze B2
-define('ASSETS_ROOT', 'https://f001.backblazeb2.com/file/esuggest-assets/');
+// Chemin files statics - B2
+define('ASSETS_ROOT', 'https://f003.backblazeb2.com/file/esuggest-projet/');
 
-// --- 4. CONNEXION À LA BASE DE DONNÉES ---
+// Connexion database
 try {
-    // Connexion PDO avec les identifiants InfinityFree
+    // Connexion PDO w/ id InfinityFree
     $pdo = new PDO(
         "mysql:host=$host;dbname=$dbname;charset=utf8mb4",
         $username,
         $password,
         [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, // Affiche les erreurs SQL
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, // Récupère les résultats sous forme de tableau associatif
+            // erreurs SQL comm exceptions
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            // résultat sous forme de tableau associatif
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            // désactive l'émulation des requêtes préparées
+            PDO::ATTR_EMULATE_PREPARES => false,
         ]
     );
 } catch (PDOException $e) {
-    // Message d'erreur personnalisé (ne pas afficher les détails en production)
+    // msg si erreur
     die("Erreur de connexion à la base de données : " . $e->getMessage());
 }
 
-// --- 5. DÉSACTIVER L'AFFICHAGE DES ERREURS EN PRODUCTION ---
-ini_set('display_errors', 1);                   // Désactive l'affichage des erreurs
+// Désactiver display error en prod
+ini_set('display_errors', 1);                   // 0 - Désactive l'affichage des erreurs, 1 - Active l'affichage
 ini_set('log_errors', 1);                       // Active la journalisation des erreurs
 ini_set('error_log', '/tmp/php_errors.log');    // Chemin pour les logs (InfinityFree gère les logs automatiquement)

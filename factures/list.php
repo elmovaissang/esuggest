@@ -1,9 +1,9 @@
 <?php
 
 // Inclure les fichiers nécessaires
-require_once '../includes/config.php';
-require_once '../includes/auth.php';
-require_once '../includes/functions.php';
+require_once 'includes/config.php';
+require_once 'includes/auth.php';
+require_once 'includes/functions.php';
 
 // Titre de la page
 $page_title = "Liste des factures";
@@ -29,7 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 }
 
 // header après vérification de connexion
-include_once '../includes/header.php';
+include_once 'includes/header.php';
 ?>
 
     <h1>Liste des factures</h1>
@@ -115,4 +115,4 @@ include_once '../includes/header.php';
 
 <?php
 // Footer
-include_once '../includes/footer.php';
+include_once 'includes/footer.php';

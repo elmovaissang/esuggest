@@ -1,9 +1,9 @@
 <?php
 
 // Inclure les fichiers nécessaires
-require_once '../includes/config.php';
-require_once '../includes/auth.php';
-require_once '../includes/functions.php';
+require_once 'includes/config.php';
+require_once 'includes/auth.php';
+require_once 'includes/functions.php';
 
 // Titre de la page
 $page_title = "Créer un classeur";
