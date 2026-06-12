@@ -1,0 +1,30 @@
+name: Deploy to InfinityFree
+
+on:
+  push:
+    branches: [main] # execution à chaque push
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest # utilise une machine virtueelle Ubuntu
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4 # récupère le code du repo
+
+      - name: Install lftp
+        run: sudo apt-get updte && sudo apt-get install -y lftp # installe lftp (= transfère les files via FTP)
+    
+      - name: Deploy to InfinityFree via FTP
+        env:
+          FTP_SERVER: ftpupload.net # serveur FTP InfinityFree
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }} # username FTP (stocké ds secrets GitHub)
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }} # mdp FTP
+          REMOTE_DIR: /htdocs/ # dossier distant sur InfinityFree
+        run: | # transfère ts les file except .git + .github + esuggest-assets/
+          lftp -e "
+            set ftp:ssl-allow no;
+            open -u $FTP_USERNAME,$FTP_PASSWORD $FTP_SERVER;
+            mirror --reverse --delete --exclude-glob .git* --exclude-glob .github* --exclude-glob esuggest-assets* . $REMOTE_DIR;
+            bye
+          "
