@@ -14,7 +14,7 @@ $password = 'pEBuZVpvFEYkI';            // Mot de passe MySQL généré par Infi
 define('SITE_ROOT', '/');
 
 // Chemin files statics - B2
-define('ASSETS_ROOT', 'https://f003.backblazeb2.com/file/esuggest-projet/');
+define('ASSETS_ROOT', 'https://f003.backblazeb2.com/file/esuggest-projet/assets/');
 
 // Connexion database
 try {

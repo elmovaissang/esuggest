@@ -1,5 +1,8 @@
 <?php
 
+// inclure functions.php pour addLog()
+require_once 'functions.php';
+
 // Vérifier si l'utilisateur est connecté
 function isLoggedIn() {
     // vérifie si la variable de session 'user_id' existe
@@ -16,7 +19,7 @@ function isAdmin() {
 function requireLogin() {
     // si user non connecté, redirigé vers login.php
     if (!isLoggedIn()) {
-        header('Location: ' . SITE_ROOT . 'login.php');
+        header('Location:' . SITE_ROOT . 'login.php');
         exit;
     }
 }
@@ -68,6 +71,6 @@ function logout($pdo) {
     session_destroy();
 
     // rediriger vers la page de connexion
-    header('Location ' . SITE_ROOT . 'login.php');
+    header('Location: ' . SITE_ROOT . 'login.php');
     exit;
 }

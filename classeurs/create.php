@@ -1,9 +1,9 @@
 <?php
 
 // Inclure les fichiers nécessaires
-require_once 'includes/config.php';
-require_once 'includes/auth.php';
-require_once 'includes/functions.php';
+require_once __DIR__ . '/../includes/config.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/functions.php';
 
 // Titre de la page
 $page_title = "Créer un classeur";
@@ -41,7 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // header après vérification de connexion
-include_once '../includes/header.php';
+include_once __DIR__ . '/../includes/header.php';
 ?>
 
     <h1>Créer un classeur</h1>
