@@ -13,8 +13,8 @@ $password = 'pEBuZVpvFEYkI';            // Mot de passe MySQL généré par Infi
 // Chemin de base, racine domaine - InfinityFree
 define('SITE_ROOT', '/');
 
-// Chemin files statics - B2
-define('ASSETS_ROOT', 'https://f003.backblazeb2.com/file/esuggest-projet/assets/');
+// Chemin files statics - GitHub Pages
+define('ASSETS_ROOT', 'https://elmovaissang.github.io/esuggest-assets/');
 
 // Connexion database
 try {
