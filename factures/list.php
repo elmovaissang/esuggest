@@ -115,4 +115,4 @@ include_once __DIR__ . '/../includes/header.php';
 
 <?php
 // Footer
-include_once 'includes/footer.php';
+include_once '../includes/footer.php';
