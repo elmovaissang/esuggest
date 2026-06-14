@@ -35,8 +35,9 @@ if (isLoggedIn()) {
 <body>
     <header>
         <div class="header-container">
-            <!-- Logo -->
-            <a href="<?= SITE_ROOT ?>index.php" class="logo">eSuggest</a>
+            <a href="<?= SITE_ROOT ?>index.php" class="logo">
+                <img src="<?= ASSETS_ROOT ?>images/eSuggest.svg" alt="eSuggest - Logo" class="logo-img">
+            </a>
 
             <!-- Barre de navigation -->
             <nav class="main-nav">
