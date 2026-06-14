@@ -31,6 +31,9 @@ if (isLoggedIn()) {
 
     <!-- Favicon -->
     <link rel="icon" type="image/x-icon" href="<?= ASSETS_ROOT ?>images/favicon.ico">
+
+    <!-- Navigation SPA-like -->
+     <script src="<?= ASSETS_ROOT ?>js/main.js" defer></script>
 </head>
 <body>
     <header>
