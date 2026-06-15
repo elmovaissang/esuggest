@@ -6,7 +6,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/functions.php';
 
 // Titre de la page
-$page_title = "Modifier la facture";
+$page_title = "Modifier la facture - eSuggest";
 
 // Vérifier la connexion du user
 requireLogin();
@@ -161,7 +161,10 @@ include_once __DIR__ . '/../includes/header.php';
             </div>
 
             <div class="form-actions">
-                <button type="submit" class="btn">Enregistrer</button>
+                <button type="submit" class="btn"
+                        aria-label="Enregistrer les modifications de la facture n°<?= htmlspecialchars($invoice['number']) ?>">
+                    Enregistrer
+                </button>
                 <a href="<?= SITE_ROOT ?>factures/list.php" class="btn btn-cancel">Annuler</a>
             </div>
         </form>

@@ -6,7 +6,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/functions.php';
 
 // Titre de la page
-$page_title = "Gestion des utilisateurs";
+$page_title = "Gestion des utilisateurs - eSuggest";
 
 // Accès réservé aux admin
 requireAdmin();
@@ -33,11 +33,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 include_once __DIR__ . '/../includes/header.php';
 ?>
 
-    <h1>Gestion des utilisateurs</h1>
+    <h1 id="users-title">Gestion des utilisateurs</h1>
 
     <!-- Messages d'erreur/succès -->
     <?php if (isset($error)): ?>
-        <div class="error"><?= htmlspecialchars($error) ?></div>
+        <div class="error" role="alert"><?= htmlspecialchars($error) ?></div>
     <?php endif; ?>
     <?php if (isset($success)): ?>
         <div class="success"><?= htmlspecialchars($success) ?></div>
@@ -56,7 +56,7 @@ include_once __DIR__ . '/../includes/header.php';
         <p>Aucun utilisateur trouvé.</p>
     <?php else: ?>
         <div class="table-container">
-            <table>
+            <table aria-labelledby="users-title">
                 <thead>
                     <tr>
                         <th>ID</th>
@@ -83,7 +83,8 @@ include_once __DIR__ . '/../includes/header.php';
                                             <input type="hidden" name="action" value="delete">
                                             <input type="hidden" name="id" value="<?= $user['id'] ?>">
                                             <button type="submit" class="btn btn-table btn-delete"
-                                                    onclick="return confirm('Êtes-vous sûr de vouloir supprimer cette facture ?')">
+                                                    onclick="return confirm('Êtes-vous sûr de vouloir supprimer cet utilisateur ?')"
+                                                    aria-label="Supprimer l'utilisateur <?= htmlspecialchars($user['fname'] . ' ' . $user['name']) ?>">
                                                 Supprimer
                                             </button>
                                         </form>

@@ -6,7 +6,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/functions.php';
 
 // Titre de la page
-$page_title = "Ajouter un utilisateur";
+$page_title = "Ajouter un utilisateur - eSuggest";
 
 // Accès réservé aux admin
 requireAdmin();
@@ -91,7 +91,10 @@ include_once __DIR__ . '/../includes/header.php';
         </div>
 
         <div class="form-actions">
-            <button type="submit" class="btn">Créer l'utilisateur</button>
+            <button type="submit" class="btn"
+                    aria-label="Créer un nouvel utilisateur">
+                Créer l'utilisateur
+            </button>
             <a href="users.php" class="btn btn-cancel">Annuler</a>
         </div>
     </form>

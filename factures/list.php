@@ -6,7 +6,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/functions.php';
 
 // Titre de la page
-$page_title = "Liste des factures";
+$page_title = "Liste des factures - eSuggest";
 
 // Vérifier la connexion du user
 requireLogin();
@@ -32,11 +32,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 include_once __DIR__ . '/../includes/header.php';
 ?>
 
-    <h1>Liste des factures</h1>
+    <h1 id="invoices-title">Liste des factures</h1>
 
     <!-- Message si erreur -->
     <?php if (isset($error)): ?>
-        <div class="error">
+        <div class="error" role="alert">
             <?= htmlspecialchars($error) ?>
         </div>
     <?php endif; ?>
@@ -70,7 +70,7 @@ include_once __DIR__ . '/../includes/header.php';
 
     <?php else: ?>
     <!-- factures -> tableau -->
-    <table>
+    <table aria-labelledby="invoice-title">
         <thead>
             <tr>
                 <th>Numéro</th>
@@ -101,7 +101,8 @@ include_once __DIR__ . '/../includes/header.php';
                                 <input type="hidden" name="action" value="delete">
                                 <input type="hidden" name="id" value="<?= $invoice['id'] ?>">
                                 <button type="submit" class="btn btn-table btn-delete"
-                                        onclick="return confirm('Êtes-vous sûr de vouloir supprimer cette facture ?')">
+                                        onclick="return confirm('Êtes-vous sûr de vouloir supprimer cette facture ?')"
+                                        aria-label="Supprimer la facture n°<?= $invoice['number'] ?>">
                                     Supprimer
                                 </button>
                             </form>

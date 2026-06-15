@@ -21,6 +21,17 @@ if (isLoggedIn()) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- tag meta SEO -->
+    <meta name="description" content="eSuggest - Gestion de factures électroniques conforme à la réforme 2024-2026. Créez, modifiez et gérez vos factures en ligne.">
+    <meta name="keywords" content="facture électronique, gestion facture, facturation, eSuggest, réforme 2024-2026, facture UBL, facture CII, facture PDF">
+    <meta name="author" content="Zehra Yosma ARIK">
+    
+    <!-- tag Open Graph réseaux -->
+    <meta property="og:title" content="eSuggest - <?= isset($page_title) ? $page_title : 'Accueil' ?>">
+    <meta property="og:description" content="Gestion de factures électroniques conforme à la réforme 2024-2026.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://esuggest.free.nf/">
+    <meta property="og:image" content="<?= ASSETS_ROOT ?>images/eSuggest.svg">
     <title>eSuggest - <?= isset($page_title) ? htmlspecialchars($page_title) : 'Accueil' ?></title>
 
     <!-- Feuille de style CSS (Backblaze B2) -->
@@ -36,10 +47,11 @@ if (isLoggedIn()) {
     <!-- <script src="<?= ASSETS_ROOT ?>js/main.js" defer></script> -->
 </head>
 <body>
-    <header>
+    <a href="main-content" class="skip-link">Aller au contenu principal</a>
+    <header role="banner">
         <div class="header-container">
             <a href="<?= SITE_ROOT ?>index.php" class="logo">
-                <img src="<?= ASSETS_ROOT ?>images/eSuggest.svg" alt="eSuggest - Logo" class="logo-img">
+                <img src="<?= ASSETS_ROOT ?>images/eSuggest.svg" alt="eSuggest - Logo de l'application de gestion de factures électroniques" class="logo-img">
             </a>
 
             <!-- Barre de navigation -->
@@ -62,5 +74,5 @@ if (isLoggedIn()) {
     </header>
 
     <!-- Début du conteneur principal (fermé dans footer.php) -->
-    <main class="main-content">
+    <main id="main-content" class="main-content" role="main">
         <div class="container">

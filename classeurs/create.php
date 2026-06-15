@@ -6,7 +6,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/functions.php';
 
 // Titre de la page
-$page_title = "Créer un classeur";
+$page_title = "Créer un classeur - eSuggest";
 
 // Vérifier la connexion du user
 requireLogin();
@@ -66,7 +66,10 @@ include_once __DIR__ . '/../includes/header.php';
         </div>
 
         <div class="form-actions">
-            <button type="submit" class="btn">Créer le classeur</button>
+            <button type="submit" class="btn"
+                    aria-label="Créer un nouveau classeur">
+                Créer le classeur
+            </button>
             <a href="list.php" class="btn btn-cancel">Annuler</a>
         </div>
     </form>

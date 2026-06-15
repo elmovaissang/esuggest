@@ -6,7 +6,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/functions.php';
 
 // Titre de la page
-$page_title = "Modifier l'utilisateur";
+$page_title = "Modifier l'utilisateur - eSuggest";
 
 // Accès réservé aux admin
 requireAdmin();
@@ -123,7 +123,10 @@ include_once __DIR__ . '/../includes/header.php';
         </div>
 
         <div class="form-actions">
-            <button type="submit" class="btn">Enregistrer</button>
+            <button type="submit" class="btn"
+                    aria-label="Enregistrer les modifications de l'utilisateur <?= htmlspecialchars($user['fname'] . ' ' . $user['name']) ?>">
+                Enregistrer
+            </button>
             <a href="users.php" class="btn btn-cancel">Annuler</a>
         </div>
     </form>

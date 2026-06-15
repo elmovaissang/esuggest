@@ -6,7 +6,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/functions.php';
 
 // Titre de la page
-$page_title = "Créer une facture";
+$page_title = "Créer une facture - eSuggest";
 
 // Vérifier la connexion du user
 requireLogin();
@@ -125,7 +125,10 @@ include_once __DIR__ . '/../includes/header.php';
         </div>
 
         <div class="form-actions">
-            <button type="submit" class="btn">Créer la facture</button>
+            <button type="submit" class="btn"
+                    aria-label="Créer une nouvelle facture">
+                Créer la facture
+            </button>
             <a href="list.php" class="btn btn-cancel">Annuler</a>
         </div>
     </form>

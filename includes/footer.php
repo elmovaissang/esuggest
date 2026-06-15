@@ -5,7 +5,7 @@
         </div>
     </main>
 
-    <footer class="main-footer">
+    <footer class="main-footer" role="contentinfo">
         <div class="footer-container">
             <div class="footer-section">
                 <h3 class="footer-title">eSuggest</h3>

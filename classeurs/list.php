@@ -6,7 +6,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/functions.php';
 
 // Titre de la page
-$page_title = "Liste des classeurs";
+$page_title = "Liste des classeurs - eSuggest";
 
 // Vérifier la connexion du user
 requireLogin();
@@ -44,7 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 include_once __DIR__ . '/../includes/header.php';
 ?>
 
-    <h1>Liste des classeurs</h1>
+    <h1 id="folders-title">Liste des classeurs</h1>
 
     <!-- Message si erreur -->
     <?php if (isset($error)): ?>
@@ -78,7 +78,7 @@ include_once __DIR__ . '/../includes/header.php';
     <p>Vous n'avez pas encore de classeurs.</p>
 
     <?php else: ?>
-        <table>
+        <table aria-labelledby="folders-title">
             <thead>
                 <tr>
                     <th>Nom</th>
@@ -101,7 +101,8 @@ include_once __DIR__ . '/../includes/header.php';
                                     <input type="hidden" name="action" value="delete">
                                     <input type="hidden" name="id" value="<?= $folder['id'] ?>">
                                     <button type="submit" class="btn btn-table btn-delete"
-                                            onclick="return confirm('Êtes-vous sûr de vouloir supprimer cette facture ?')">
+                                            onclick="return confirm('Êtes-vous sûr de vouloir supprimer cette facture ?')"
+                                            aria-label="Supprimer le classeur <?= htmlspecialchars($folder['name']) ?>">
                                         Supprimer
                                     </button>
                                 </form>

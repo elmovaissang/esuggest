@@ -6,7 +6,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/functions.php';
 
 // Titre de la page
-$page_title = "Classeur";
+$page_title = "Classeur - eSuggest";
 
 // Vérifier la connexion du user
 requireLogin();
